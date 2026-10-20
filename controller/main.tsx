@@ -7,6 +7,7 @@ import './controller.css';
 import { HandPhone } from '../shared/art/HandPhone.tsx';
 import { StampWord, Sunburst, Wordmark } from '../shared/art/Logo.tsx';
 import { Paddle } from '../shared/art/Paddle.tsx';
+import { PhoneMenu } from './PhoneMenu.tsx';
 import { type PhoneSession as Session, PhoneSession, usePhone } from './session.ts';
 import { platform } from './sensors.ts';
 
@@ -123,6 +124,9 @@ function Play({ s }: { s: Session }) {
   if (st.wasLinked && st.transport === 'none') {
     return <Message icon="↻" iconBg="var(--cobalt-100)" title="Reconnecting…" body="Hang on — we’re finding your laptop. The game is paused." button="Rejoin now" primary={false} onButton={() => s.rejoin()} />;
   }
+
+  // Between matches the phone mirrors the laptop menu so you can set up the game from your hand.
+  if (st.ui === 'lobby' && st.menu && st.menu.screen !== 'other') return <PhoneMenu s={s} menu={st.menu} status={<StatusPill s={s} />} />;
 
   const mode = smash ? 'smash' : st.ui === 'serve' ? 'serve' : st.ui === 'between' ? 'between' : hit ? 'flash' : 'idle';
   const bg = { idle: 'var(--phone-bg)', serve: 'var(--sun-400)', between: 'var(--phone-bg)', flash: 'var(--cobalt-50)', smash: 'var(--p1)' }[mode];

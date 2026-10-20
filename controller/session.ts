@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { ClockSync } from '../shared/clock.ts';
 import { PeerLink, type TransportKind } from '../shared/net/PeerLink.ts';
 import { ServerConn } from '../shared/net/ServerConn.ts';
-import type { HitTier, Quat, UiState } from '../shared/protocol.ts';
+import type { HitTier, MenuMirror, PhoneMsg, Quat, UiState } from '../shared/protocol.ts';
 import { defaultConfig } from '../engine/config.ts';
 import { type DetectedSwing, MotionPipeline, type RawEvent } from './motion.ts';
 import { Recorder } from './recorder.ts';
@@ -32,6 +32,8 @@ export interface PhoneState {
   recCount: { events: number; swings: number };
   lastSwing: DetectedSwing | null;
   axisLocked: boolean;
+  /** Laptop menu state while not in a match. */
+  menu: MenuMirror | null;
 }
 
 const ORIENT_MIN_INTERVAL_MS = 1000 / 60 - 2;
@@ -61,7 +63,7 @@ export class PhoneSession {
   private stopWatch: (() => void) | null = null;
 
   constructor(room: string) {
-    this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null, score: null, lastPoint: null, nextYou: false, wasLinked: false, dev: new URLSearchParams(location.search).has('dev'), recording: false, recCount: { events: 0, swings: 0 }, lastSwing: null, axisLocked: false };
+    this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null, score: null, lastPoint: null, nextYou: false, wasLinked: false, dev: new URLSearchParams(location.search).has('dev'), recording: false, recCount: { events: 0, swings: 0 }, lastSwing: null, axisLocked: false, menu: null };
     const pid = phoneId();
 
     this.conn.onOpen(() => this.conn.send({ k: 'join', code: room, pid }));
@@ -105,7 +107,7 @@ export class PhoneSession {
     this.link.onMessage((m) => {
       if (m.k === 'pong') this.clock.onPong(m.t0, m.t1, m.t2);
       else if (m.k === 'cfg') this.pipe.detector.params = { ...m.swing };
-      else if (m.k === 'st') this.set({ ui: m.s, score: m.sc ?? null, lastPoint: m.pt ?? null, nextYou: !!m.nx });
+      else if (m.k === 'st') this.set({ ui: m.s, score: m.sc ?? null, lastPoint: m.pt ?? null, nextYou: !!m.nx, menu: m.menu ?? null });
       else if (m.k === 'hit') {
         const tier = m.tier ?? 'nice';
         vibrate(tier === 'smash' ? [40, 30, 40] : tier === 'great' ? 25 : 10);
@@ -186,6 +188,11 @@ export class PhoneSession {
   /** Pause button: toggles pause / resume on the laptop. */
   pause(): void {
     this.link.send({ k: 'pz' });
+  }
+
+  /** Drive the laptop's menu from the phone. */
+  act(m: Extract<PhoneMsg, { k: 'act' }>): void {
+    this.link.send(m);
   }
 
   rejoin(): void {

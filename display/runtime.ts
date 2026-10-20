@@ -6,7 +6,7 @@ import { type Side, other } from '../engine/physics.ts';
 import type { PointReason } from '../engine/referee.ts';
 import { gamesToWin } from '../engine/rules.ts';
 import { MARLO_LOOK } from '../shared/art/Char.tsx';
-import type { HitTier, UiState } from '../shared/protocol.ts';
+import type { HitTier, MenuMirror, UiState } from '../shared/protocol.ts';
 import { loadConfig } from './devConfig.ts';
 import { MouseInput } from './input/MouseInput.ts';
 import type { PaddleInput, Swing } from './input/PaddleInput.ts';
@@ -77,6 +77,17 @@ export class Runtime {
       const s = store.get().screen;
       if (s === 'playing') this.pause('user');
       else if (s === 'paused') this.resume();
+    });
+
+    this.host.input.onAction((act) => {
+      const { screen, settings } = store.get();
+      if (act.a === 'set') {
+        if (screen === 'setup' || screen === 'menu') store.set({ settings: { ...settings, [act.key]: act.v } });
+      } else if (act.a === 'play' && screen === 'menu') this.go('setup');
+      else if (act.a === 'back' && screen === 'setup') this.go('menu');
+      else if (act.a === 'start' && screen === 'setup') this.startMatch(settings);
+      else if (act.a === 'rematch' && screen === 'matchOver') this.startMatch(settings);
+      else if (act.a === 'menu' && screen === 'matchOver') this.quitToMenu();
     });
 
     this.host.onStatus((s) => this.onPhoneStatus(s));
@@ -232,7 +243,18 @@ export class Runtime {
               ? 'rally'
               : 'between';
     const sc: [number, number] | undefined = this.attract ? undefined : [g.score.points[0], g.score.points[1]];
-    const msg = { k: 'st' as const, s, sc, pt: s === 'between' ? this.lastPoint : undefined, nx: g.server === 0 };
+    const ui = store.get();
+    const menu: MenuMirror | undefined =
+      s === 'lobby'
+        ? {
+            screen: screen === 'menu' ? 'menu' : screen === 'setup' ? 'setup' : screen === 'matchOver' ? 'results' : 'other',
+            cpuLevel: ui.settings.cpuLevel,
+            assist: ui.settings.assist,
+            bestOf: ui.settings.bestOf,
+            ...(screen === 'matchOver' && ui.hud ? { won: ui.winner === 0, games: ui.hud.games } : {}),
+          }
+        : undefined;
+    const msg = { k: 'st' as const, s, sc, pt: s === 'between' ? this.lastPoint : undefined, nx: g.server === 0, menu };
     const sig = JSON.stringify(msg);
     if (sig === this.sentUi) return;
     this.sentUi = sig;

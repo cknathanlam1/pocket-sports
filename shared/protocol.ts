@@ -19,7 +19,23 @@ export type PhoneMsg =
   /** Result of a sync round: off = laptopClock − phoneClock (ms), rtt in ms. */
   | { k: 'sync'; off: number; rtt: number }
   /** Pause button on the phone: toggles pause / resume. */
-  | { k: 'pz' };
+  | { k: 'pz' }
+  /** Menu actions from the phone's mirrored menu (see MenuMirror). */
+  | { k: 'act'; a: MenuAction }
+  | { k: 'act'; a: 'set'; key: 'cpuLevel' | 'assist' | 'bestOf'; v: string | number };
+
+export type MenuAction = 'play' | 'start' | 'back' | 'menu' | 'rematch';
+
+/** What the laptop's menus show, mirrored on the phone so you can set up a match from it. */
+export interface MenuMirror {
+  screen: 'menu' | 'setup' | 'results' | 'other';
+  cpuLevel: 'easy' | 'normal' | 'hard';
+  assist: 'easy' | 'normal' | 'pro';
+  bestOf: 1 | 3 | 5;
+  /** Results only: did you win, and the games score. */
+  won?: boolean;
+  games?: [number, number];
+}
 
 export type UiState = 'serve' | 'rally' | 'between' | 'paused' | 'lobby';
 
@@ -28,7 +44,7 @@ export type HitTier = 'nice' | 'great' | 'smash';
 /** Laptop → phone */
 export type DisplayMsg =
   /** UI state. sc = [you, cpu] points; pt = how the last point went; nx = next server is you. */
-  | { k: 'st'; s: UiState; sc?: [number, number]; pt?: 'won' | 'lost' | 'let'; nx?: boolean }
+  | { k: 'st'; s: UiState; sc?: [number, number]; pt?: 'won' | 'lost' | 'let'; nx?: boolean; menu?: MenuMirror }
   /** Your hit landed: feedback tier, ball speed (km/h) and rally length. */
   | { k: 'hit'; strength: number; tier?: HitTier; kmh?: number; rally?: number }
   /** Live swing-detector tuning from the dev panel. */

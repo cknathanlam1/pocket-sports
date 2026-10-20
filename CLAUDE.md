@@ -46,7 +46,9 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `store.ts` + `ui/`: React screens on a 1440×900 stage scaled to the window (`ui/Stage.tsx`), named after the design ids:
   title 7a → pairing 2a/2b → calibrate 2c (live tilt/roll mirror) → menu 2g (+ settings) → setup 2i → match HUD 2j–2o (score cards, rally pill, phone pill, banners, coach hint,
   hit tiers 7c/7d, POINT! 7e, match-point glow) → paused 2p / connection lost 2r → results 2q. Customize 2h saves a look to localStorage.
-  Phone taps drive the whole flow: menu → setup → start; pause button toggles pause. Hit tiers: Nice < 35 km/h, Great 35–55, SMASH 55+ or |timing| < 20 ms
+  Between matches the phone mirrors the laptop menu, setup and results (`controller/PhoneMenu.tsx`, `st.menu` → `act` messages back). The laptop stays the source of truth.
+  Phone taps still work on the laptop screens too (menu → setup → start); the pause button toggles pause.
+  The near player is rendered see-through (`ghost()` in `scene/World.ts`) so the ball stays visible behind them. Hit tiers: Nice < 35 km/h, Great 35–55, SMASH 55+ or |timing| < 20 ms
   (hit-stop 40/80 ms, camera shake, flash). In dev, `window.pocketStore` exposes the UI store.
 - Not built yet from the design: tutorial 2d–2f (needs phone swings, M3), practice mode and sound (M4), 3D poses beyond swing (cheer/sad).
 

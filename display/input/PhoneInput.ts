@@ -1,6 +1,8 @@
 // Phone paddle: orientation stream + calibration from the controller; taps (and swings in M3).
 // Phone timestamps are converted to the laptop clock with the offset from clock sync.
 import type { PhoneMsg, Quat } from '../../shared/protocol.ts';
+
+export type PhoneAction = Extract<PhoneMsg, { k: 'act' }>;
 import { IDENTITY, relativeTo } from '../../shared/quat.ts';
 import { Emitter, type PaddleInput, type Swing } from './PaddleInput.ts';
 
@@ -8,6 +10,7 @@ export class PhoneInput implements PaddleInput {
   private swings = new Emitter<Swing>();
   private taps = new Emitter<number>();
   private pauses = new Emitter<void>();
+  private actions = new Emitter<PhoneAction>();
   private q: Quat | null = null;
   private q0: Quat | null = null;
   /** laptop clock − phone clock (ms); null until the first sync round. */
@@ -65,6 +68,9 @@ export class PhoneInput implements PaddleInput {
       case 'pz':
         this.pauses.emit();
         break;
+      case 'act':
+        this.actions.emit(m);
+        break;
       case 'sync':
         this.offset = m.off;
         this.rtt = m.rtt;
@@ -87,6 +93,11 @@ export class PhoneInput implements PaddleInput {
   /** Pause button on the phone. */
   onPause(cb: () => void): () => void {
     return this.pauses.on(cb);
+  }
+
+  /** Menu actions from the phone (mirrored menu / setup / results). */
+  onAction(cb: (a: PhoneAction) => void): () => void {
+    return this.actions.on(cb);
   }
 
   dispose(): void {}

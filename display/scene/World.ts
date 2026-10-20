@@ -54,6 +54,24 @@ function outlined(geo: THREE.BufferGeometry, mat: THREE.Material, thickness = 1.
   return g;
 }
 
+/** See-through look for the near player, who stands between the camera and the ball. */
+const GHOST_OPACITY = 0.28;
+const ghostInk = new THREE.MeshBasicMaterial({ color: C.ink, side: THREE.BackSide, transparent: true, opacity: GHOST_OPACITY + 0.12, depthWrite: false });
+function ghost(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    if (o.material === inkMat) {
+      o.material = ghostInk;
+    } else {
+      const m = o.material as THREE.Material;
+      m.transparent = true;
+      m.opacity = GHOST_OPACITY;
+      m.depthWrite = false;
+    }
+    o.renderOrder = 10; // after the ball and table, so they show through
+  });
+}
+
 function canvasTexture(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = w;
@@ -343,6 +361,7 @@ export class World {
     body.add(armR);
 
     root.rotation.y = side === 0 ? 0 : Math.PI;
+    if (side === 0) ghost(root);
     this.scene.add(root);
 
     const paddle = this.buildPaddle(side === 0 ? C.p1 : C.p2, side === 0 ? 'circle' : 'diamond');
