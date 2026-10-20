@@ -175,7 +175,8 @@ export class Game {
   private advanceBall(): void {
     const e = stepBall(this.ball, this.dt, this.cfg.physics);
     this.ring.push({ t: this.simTime, ball: cloneBall(this.ball) });
-    const max = Math.ceil(this.cfg.physics.stepHz * 1.0);
+    // Lag-compensation window: hit.ringBufferMs of real time, expressed in sim steps.
+    const max = Math.ceil((this.cfg.physics.stepHz * this.cfg.hit.ringBufferMs * this.cfg.physics.gameSpeed) / 1000) + 2;
     if (this.ring.length > max) this.ring.splice(0, this.ring.length - max);
     if (e) this.onPhysEvent(e);
   }

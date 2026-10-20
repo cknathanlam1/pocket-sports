@@ -2,13 +2,14 @@
 
 Browser game: the laptop renders a 3D table tennis match (Three.js); a phone joins by QR
 code (no install) and becomes a motion-controlled paddle. Built milestone by milestone
-(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M2 built** (pairing, QR, WebRTC + relay, phone paddle mirroring). Real-phone verification is pending.
+(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M3 built** (phone swing detection, lag-compensated phone hits, dev panel, sensor recording + replay tests) on top of the Claude Design reskin. Real-phone verification is pending.
 
 ## Commands
 - Windows PowerShell blocks `npm.ps1`: use `npm.cmd ...` there (or Git Bash / cmd).
 - `npm run dev`: ws server (:8787, `node --watch`) + Vite (:5173, proxies `/ws`). Open http://localhost:5173
 - `npm run tunnel`: public HTTPS URL for phone testing (needs `cloudflared`, see below)
 - `npm test` / `npm run test:watch`: Vitest (`tests/**/*.test.ts`)
+- `npm run fixtures`: regenerate the synthetic sensor recordings in `tests/fixtures/recordings/`
 - `npm run typecheck`: `tsc --noEmit` (strict)
 - `npm run build && npm start`: production. One Node process serves `dist/` + `/ws` on `$PORT` (default 8787)
 
@@ -59,6 +60,20 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - Phone (`/controller`): `orientation.ts` (W3C alpha/beta/gamma → quaternion, pure), `sensors.ts` (iOS permission from the tap, orientation stream, wake lock, portrait lock, vibrate), `session.ts` (join, link, clock sync, 60 Hz `o` stream, calibration), `main.tsx` (screens 3a–3l, plus the 7f SMASH flood with tier-based vibration).
   Calibration pose: phone upright, screen toward the player. In that pose the device axes equal the paddle axes, so q0⁻¹·q drives the on-screen paddle directly. Motion is judged by events arriving, not by the permission answer.
 
+### Swings (M3)
+- `controller/motion.ts` (pure, replayable): `RateAdapter` → `SwingDetector` → `MotionPipeline`. Browsers disagree on rotationRate axis labels and units, so the adapter starts with the
+  W3C mapping and **auto-calibrates**: it compares rotationRate against the ω derived from successive orientation quaternions, then locks the best of 96 signed permutation × unit candidates.
+- Detector: |ω| ≥ `swing.onsetDegPerSec` starts tracking. The swing is emitted once |ω| < peak × `peakDropRatio`, stamped at the parabolic-refined peak; refractory `refractoryMs`.
+  Features: peak |ω|; face = paddle pitch vs calibration (+ = open: the phone's back tilts up); path = −mean ω_x (+ = upward brush/topspin); roll = mean ω about `swing.rollAxis`.
+  **Deviation:** the spec says roll is about the phone's long axis (y), but with the phone held upright the main swing rotates about y, so every swing would get sidespin.
+  The default is `z` (screen normal, steering-wheel twist). Switch in the dev panel.
+- Phone sends `s` (reliable channel, phone clock) and |ω| inside `o`. The laptop converts with the clock offset; `Game.swing` judges at the swing moment
+  (ring buffer = `hit.ringBufferMs` of real time) and re-simulates forward.
+- Dev panel on the laptop (backtick key): link/RTT/clock offset, a |ω| graph with swing markers, last swing features + delivery lag, last hit timing, and sliders for every numeric
+  config value (saved to localStorage via `display/devConfig.ts`; "Copy config"). Swing params are pushed to the phone live (`cfg` message).
+- Phone dev mode `/p/CODE?dev`: Record button → raw sensor JSON (share sheet or download). Add `expected.peaks` (ms) and drop it into `tests/fixtures/recordings/`.
+  `tests/swing.test.ts` replays every file there; the current iPhone/Android files are synthetic (60 Hz / 100 Hz + jitter), so replace them with real ones.
+
 Routing: `/p/:room` → `controller.html`, via a Vite middleware in dev (`vite.config.ts`) and `server/static.ts` in prod. Both use `CONTROLLER_PATH_RE`.
 
 Conventions: TS strict + `erasableSyntaxOnly` (no enums or parameter properties) because the server runs `.ts`
@@ -85,7 +100,8 @@ The laptop QR encodes `location.origin`, so open the laptop page via the tunnel 
 Desktop testing without a phone: open `/p/CODE` in a mobile-sized tab and dispatch `DeviceOrientationEvent`s from the console. The tap on Enable motion must be a real click.
 
 ## Status / known gaps
-- Phone swings (swing detection, rotationRate axis/unit adapter, lag-compensated phone hits) are M3. Until then, swings come from the mouse even in phone mode.
+- Mouse swings still work alongside the phone (useful for testing).
+- Testing in the hidden Claude browser pane throttles rAF, and with the 0.1 s frame clamp the game then runs slower than real time. Judge timing feel on a real, visible screen.
 - Not yet verified on a real iPhone/Android, or on cellular. No TURN server: symmetric NATs fall back to the relay by design.
 - Audio, dev panel, practice mode: M3–M4.
 - /design not imported yet (Claude Design needs `/design-login` from an interactive Claude Code session).

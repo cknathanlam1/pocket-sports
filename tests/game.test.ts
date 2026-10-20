@@ -45,6 +45,20 @@ describe('game', () => {
     expect(Math.abs(r.offsetMs!)).toBeLessThan(10);
   });
 
+  it('lag compensation: a phone swing arriving 150 ms (relay-ish) after it happened still lands on time', () => {
+    const g = humanVsCpu({ assist: 'normal' });
+    g.update(0.1);
+    g.toss(0);
+    const ideal = g.contact!.t;
+    const swingAt = ideal - 0.03 * defaultConfig.physics.gameSpeed; // swung 30 ms early (real)
+    while (g.simTime < swingAt + 0.15 * defaultConfig.physics.gameSpeed) g.update(1 / 240);
+    const age = (g.simTime - swingAt) / defaultConfig.physics.gameSpeed;
+    const r = g.swing(0, age, neutral);
+    expect(r.result).toBe('hit');
+    expect(r.offsetMs!).toBeGreaterThan(-40);
+    expect(r.offsetMs!).toBeLessThan(-20);
+  });
+
   it('a swing far outside the window misses', () => {
     const g = humanVsCpu();
     g.update(0.1);

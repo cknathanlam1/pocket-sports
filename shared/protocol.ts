@@ -7,8 +7,8 @@ export type Quat = [number, number, number, number];
 
 /** Phone → laptop */
 export type PhoneMsg =
-  /** Raw device orientation (device → earth), ~60 Hz, lossy channel. */
-  | { k: 'o'; t: number; q: Quat }
+  /** Raw device orientation (device → earth), ~60 Hz, lossy channel. w = current |ω| (deg/s) for the dev graph. */
+  | { k: 'o'; t: number; q: Quat; w?: number }
   /** Swing, stamped at its peak (M3). */
   | { k: 's'; t: number; peak: number; face: number; path: number; roll: number }
   | { k: 'tap'; t: number }
@@ -31,6 +31,8 @@ export type DisplayMsg =
   | { k: 'st'; s: UiState; sc?: [number, number]; pt?: 'won' | 'lost' | 'let'; nx?: boolean }
   /** Your hit landed: feedback tier, ball speed (km/h) and rally length. */
   | { k: 'hit'; strength: number; tier?: HitTier; kmh?: number; rally?: number }
+  /** Live swing-detector tuning from the dev panel. */
+  | { k: 'cfg'; swing: { onsetDegPerSec: number; refractoryMs: number; peakDropRatio: number; maxDurationMs: number; rollAxis: 'y' | 'z' } }
   /** t0 echoed; t1 = laptop receive time; t2 = laptop send time. */
   | { k: 'pong'; t0: number; t1: number; t2: number };
 

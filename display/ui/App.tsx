@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { Runtime } from '../runtime.ts';
 import { store, useUi } from '../store.ts';
+import { DevPanel } from './DevPanel.tsx';
 import { Calibrate } from './screens/Calibrate.tsx';
 import { Customize } from './screens/Customize.tsx';
 import { Hud } from './screens/Hud.tsx';
@@ -9,7 +10,7 @@ import { Paused, Results, Toast } from './screens/Overlays.tsx';
 import { Pairing, Title } from './screens/Pairing.tsx';
 
 export function App({ rt }: { rt: Runtime }) {
-  const { screen } = useUi();
+  const { screen, devOpen } = useUi();
   const leaveTitle = useCallback(() => {
     if (store.get().screen === 'title') rt.go(store.get().phone.phone === 'calibrated' ? 'menu' : 'pairing');
   }, [rt]);
@@ -25,6 +26,7 @@ export function App({ rt }: { rt: Runtime }) {
       {screen === 'paused' && <Paused rt={rt} />}
       {screen === 'matchOver' && <Results rt={rt} />}
       <Toast />
+      {devOpen && <DevPanel rt={rt} />}
     </>
   );
 }

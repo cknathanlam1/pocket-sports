@@ -1,7 +1,6 @@
 // Browser sensor plumbing for the phone: permission, orientation stream, wake lock, portrait lock.
 // All platform differences (iOS permission prompts, event availability) are handled here.
-import type { Quat } from '../shared/protocol.ts';
-import { eulerToQuat } from './orientation.ts';
+import type { RawEvent } from './motion.ts';
 
 export type Platform = 'ios' | 'android' | 'other';
 
@@ -36,27 +35,34 @@ export async function requestMotion(): Promise<PermissionResult> {
 }
 
 /**
- * Stream device orientation as quaternions. Resolves `false` if no events arrive within 1.5 s
- * (sensor blocked or absent, e.g. desktop browsers).
+ * Stream raw sensor events: DeviceOrientation (alpha/beta/gamma) and DeviceMotion rotationRate,
+ * timestamped with the event clock (same base as performance.now()). Resolves `firstEvent` false if
+ * no orientation arrives within 1.5 s (sensor blocked or absent, e.g. desktop browsers).
  */
-export function watchOrientation(cb: (q: Quat, t: number) => void): { stop: () => void; firstEvent: Promise<boolean> } {
+export function watchSensors(cb: (ev: RawEvent) => void): { stop: () => void; firstEvent: Promise<boolean> } {
   let got = false;
   let resolveFirst: (v: boolean) => void = () => {};
   const firstEvent = new Promise<boolean>((r) => (resolveFirst = r));
-  const onEvent = (e: DeviceOrientationEvent) => {
+  const onOrient = (e: DeviceOrientationEvent) => {
     if (e.alpha === null && e.beta === null && e.gamma === null) return;
     if (!got) {
       got = true;
       resolveFirst(true);
     }
-    cb(eulerToQuat(e.alpha ?? 0, e.beta ?? 0, e.gamma ?? 0), e.timeStamp || performance.now());
+    cb({ k: 'o', t: e.timeStamp || performance.now(), e: [e.alpha ?? 0, e.beta ?? 0, e.gamma ?? 0] });
   };
-  window.addEventListener('deviceorientation', onEvent);
+  const onMotion = (e: DeviceMotionEvent) => {
+    const r = e.rotationRate;
+    cb({ k: 'm', t: e.timeStamp || performance.now(), rr: r && r.alpha !== null ? [r.alpha ?? 0, r.beta ?? 0, r.gamma ?? 0] : null });
+  };
+  window.addEventListener('deviceorientation', onOrient);
+  window.addEventListener('devicemotion', onMotion);
   const t = setTimeout(() => resolveFirst(got), 1500);
   return {
     stop: () => {
       clearTimeout(t);
-      window.removeEventListener('deviceorientation', onEvent);
+      window.removeEventListener('deviceorientation', onOrient);
+      window.removeEventListener('devicemotion', onMotion);
     },
     firstEvent,
   };

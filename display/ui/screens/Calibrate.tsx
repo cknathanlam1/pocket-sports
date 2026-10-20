@@ -8,12 +8,12 @@ import { Stage } from '../Stage.tsx';
 
 const DEG = 180 / Math.PI;
 
-/** Tilt (+ = face opened up) and roll (+ = clockwise) in degrees. Raw poses use earth z-up; calibrated poses use y-up. */
+/** Tilt (+ = open face: the phone back tilts toward the sky) and roll (+ = clockwise) in degrees. Raw poses use earth z-up; calibrated poses use y-up. */
 export function tiltRoll(q: [number, number, number, number], calibrated: boolean): { tilt: number; roll: number } {
   const z = rotate(q, [0, 0, 1]);
   const x = rotate(q, [1, 0, 0]);
   const up = calibrated ? 1 : 2;
-  return { tilt: Math.asin(Math.max(-1, Math.min(1, z[up]))) * DEG, roll: -Math.asin(Math.max(-1, Math.min(1, x[up]))) * DEG };
+  return { tilt: -Math.asin(Math.max(-1, Math.min(1, z[up]))) * DEG, roll: -Math.asin(Math.max(-1, Math.min(1, x[up]))) * DEG };
 }
 
 function usePose(rt: Runtime): { tilt: number; roll: number; live: boolean } {

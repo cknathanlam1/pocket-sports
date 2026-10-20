@@ -29,6 +29,9 @@ export const defaultConfig = {
   swing: {
     onsetDegPerSec: 300,
     refractoryMs: 250,
+    peakDropRatio: 0.8, // emit once |ω| falls below peak × this
+    maxDurationMs: 400,
+    rollAxis: 'z' as 'y' | 'z', // body axis for sidespin; y = long axis (spec), z = screen normal (default, see CLAUDE.md)
   },
   hit: {
     reachRadius: 0.6, // m

@@ -111,7 +111,7 @@ function Play({ s }: { s: Session }) {
   const smash = hit && st.flash?.tier === 'smash';
 
   const onDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.pause-btn')) return;
+    if ((e.target as HTMLElement).closest('.pause-btn, .dev-bar')) return;
     e.preventDefault();
     const now = performance.now();
     s.tap();
@@ -169,8 +169,31 @@ function Play({ s }: { s: Session }) {
           </div>
         </div>
       )}
+      {st.dev && <DevBar s={s} />}
       {hint && <div className={`pad-hint ${mode === 'serve' ? 'ink' : ''}`}>{hint}</div>}
       {mode === 'flash' && <div className="white-flash" />}
+    </div>
+  );
+}
+
+/** Dev mode (?dev): record raw sensor sessions for replay tests; show the last detected swing. */
+function DevBar({ s }: { s: Session }) {
+  const st = usePhone(s);
+  const sw = st.lastSwing;
+  return (
+    <div className="dev-bar">
+      <button className={`rec ${st.recording ? 'on' : ''}`} onClick={() => s.toggleRecording()}>
+        {st.recording ? `■ Stop (${st.recCount.swings} swings)` : '● Record'}
+      </button>
+      <div className="dev-read">
+        axes {st.axisLocked ? 'locked' : 'calibrating…'}
+        {sw && (
+          <>
+            <br />
+            peak {Math.round(sw.peak)}°/s · face {Math.round((sw.face * 180) / Math.PI)}° · path {Math.round(sw.path)} · roll {Math.round(sw.roll)}
+          </>
+        )}
+      </div>
     </div>
   );
 }

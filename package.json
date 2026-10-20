@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tunnel": "cloudflared tunnel --url http://localhost:5173"
+    "tunnel": "cloudflared tunnel --url http://localhost:5173",
+    "fixtures": "node scripts/make-fixtures.ts"
   },
   "dependencies": {
     "qrcode-generator": "^2.0.4",

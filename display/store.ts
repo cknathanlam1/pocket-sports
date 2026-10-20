@@ -64,6 +64,7 @@ export interface UiState {
   usingPhone: boolean;
   pauseReason: 'user' | 'phone' | null;
   settingsOpen: boolean;
+  devOpen: boolean;
   toast: { key: number; text: string; icon: string; tone: 'info' | 'ok' | 'warn' } | null;
 }
 
@@ -104,6 +105,7 @@ let state: UiState = {
   usingPhone: false,
   pauseReason: null,
   settingsOpen: false,
+  devOpen: false,
   toast: null,
 };
 const listeners = new Set<() => void>();

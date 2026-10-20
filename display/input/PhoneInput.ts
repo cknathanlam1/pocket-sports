@@ -15,6 +15,9 @@ export class PhoneInput implements PaddleInput {
   rtt: number | null = null;
   /** Laptop time the last orientation sample arrived. */
   lastOrientAt = -Infinity;
+  /** Dev graph: |ω| samples and detected swings, in laptop time (ms), last ~6 s. */
+  readonly rateHistory: Array<{ t: number; w: number }> = [];
+  readonly swingHistory: Array<Swing & { arrived: number }> = [];
 
   /** Latest raw device orientation (device → earth), before calibration. */
   get raw(): Quat | null {
@@ -41,6 +44,10 @@ export class PhoneInput implements PaddleInput {
       case 'o':
         this.q = m.q;
         this.lastOrientAt = performance.now();
+        if (m.w !== undefined) {
+          this.rateHistory.push({ t: this.toLocal(m.t), w: m.w });
+          while (this.rateHistory.length > 400) this.rateHistory.shift();
+        }
         break;
       case 'cal':
         this.q0 = m.q0;
@@ -48,9 +55,13 @@ export class PhoneInput implements PaddleInput {
       case 'tap':
         this.taps.emit(this.toLocal(m.t));
         break;
-      case 's':
-        this.swings.emit({ t: this.toLocal(m.t), peak: m.peak, face: m.face, path: m.path, roll: m.roll });
+      case 's': {
+        const sw = { t: this.toLocal(m.t), peak: m.peak, face: m.face, path: m.path, roll: m.roll };
+        this.swingHistory.push({ ...sw, arrived: performance.now() });
+        while (this.swingHistory.length > 20) this.swingHistory.shift();
+        this.swings.emit(sw);
         break;
+      }
       case 'pz':
         this.pauses.emit();
         break;

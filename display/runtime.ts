@@ -1,13 +1,13 @@
 // Owns the renderer, the world, the input sources and the current Game; runs the frame loop and
 // the screen flow (pairing → calibrate → menu → setup → match → results).
 import * as THREE from 'three';
-import { defaultConfig } from '../engine/config.ts';
 import { Game, type GameEvent } from '../engine/game.ts';
 import { type Side, other } from '../engine/physics.ts';
 import type { PointReason } from '../engine/referee.ts';
 import { gamesToWin } from '../engine/rules.ts';
 import { MARLO_LOOK } from '../shared/art/Char.tsx';
 import type { HitTier, UiState } from '../shared/protocol.ts';
+import { loadConfig } from './devConfig.ts';
 import { MouseInput } from './input/MouseInput.ts';
 import type { PaddleInput, Swing } from './input/PaddleInput.ts';
 import { PhoneHost } from './net/PhoneHost.ts';
@@ -35,7 +35,8 @@ const TIER_FX: Record<HitTier, { stopMs: number; shake: number; hits: number }> 
 };
 
 export class Runtime {
-  readonly cfg = structuredClone(defaultConfig);
+  /** Live tuning values (defaults + dev-panel overrides). Games read this object directly. */
+  readonly cfg = loadConfig();
   readonly host = new PhoneHost();
   private renderer: THREE.WebGLRenderer;
   private world = new World();
@@ -81,6 +82,7 @@ export class Runtime {
     this.host.onStatus((s) => this.onPhoneStatus(s));
 
     window.addEventListener('keydown', (e) => {
+      if (e.key === '`') store.set({ devOpen: !store.get().devOpen });
       if (e.key !== 'Escape' || this.attract) return;
       const s = store.get().screen;
       if (s === 'playing') this.pause('user');
@@ -98,6 +100,7 @@ export class Runtime {
     store.set({ phone: s });
     const screen = store.get().screen;
     if (s.transport === 'none') this.sentUi = ''; // resend state when it comes back
+    else if (prev.transport === 'none') this.pushSwingConfig();
 
     // Pairing flow: connected → (show ✓ briefly) → calibrate → menu.
     if (s.phone === 'connected' && screen === 'pairing') {
@@ -110,6 +113,11 @@ export class Runtime {
     if (prev.phone !== 'none' && s.phone === 'none' && !store.get().usingPhone) store.toast('Phone disconnected', '!', 'warn');
     // Phone dropped mid-match → auto-pause with the reconnect card (2r).
     if (store.get().usingPhone && s.phone !== 'calibrated' && store.get().screen === 'playing') this.pause('phone');
+  }
+
+  /** Send the swing-detector tuning to the phone (it runs detection locally). */
+  pushSwingConfig(): void {
+    this.host.send({ k: 'cfg', swing: { ...this.cfg.swing } });
   }
 
   go(screen: Screen): void {
