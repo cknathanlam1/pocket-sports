@@ -5,6 +5,7 @@ import type { Phase } from '../engine/game.ts';
 import type { Side } from '../engine/physics.ts';
 import type { BestOf } from '../engine/rules.ts';
 import type { TimingClass } from '../engine/shot.ts';
+import type { PhoneStatus } from './net/PhoneHost.ts';
 
 export type Screen = 'menu' | 'playing' | 'paused' | 'matchOver';
 
@@ -36,6 +37,10 @@ export interface UiState {
   banner: Banner | null;
   timing: { key: number; offsetMs: number; timing: TimingClass; hit: boolean } | null;
   winner: Side | null;
+  phone: PhoneStatus;
+  /** The current match is controlled by the phone (pause if it drops). */
+  usingPhone: boolean;
+  pauseReason: 'user' | 'phone' | null;
 }
 
 const SETTINGS_KEY = 'pocket-sports.settings';
@@ -49,7 +54,17 @@ function loadSettings(): MenuSettings {
   }
 }
 
-let state: UiState = { screen: 'menu', settings: loadSettings(), hud: null, banner: null, timing: null, winner: null };
+let state: UiState = {
+  screen: 'menu',
+  settings: loadSettings(),
+  hud: null,
+  banner: null,
+  timing: null,
+  winner: null,
+  phone: { serverUp: false, code: null, url: null, transport: 'none', phone: 'none', rtt: null },
+  usingPhone: false,
+  pauseReason: null,
+};
 const listeners = new Set<() => void>();
 
 export const store = {

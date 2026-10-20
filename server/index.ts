@@ -1,9 +1,9 @@
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { DEV_SERVER_PORT, WS_PATH } from '../shared/constants.ts';
-import type { ClientMsg, ServerMsg } from '../shared/protocol.ts';
+import { Rooms } from './rooms.ts';
 import { staticHandler } from './static.ts';
 
 const port = Number(process.env.PORT ?? DEV_SERVER_PORT);
@@ -16,23 +16,36 @@ const http = createServer((req, res) => {
   res.writeHead(404).end('Static files are served by Vite in dev (port 5173).');
 });
 
+const rooms = new Rooms();
 const wss = new WebSocketServer({ server: http, path: WS_PATH });
-
-const send = (ws: import('ws').WebSocket, msg: ServerMsg) => ws.send(JSON.stringify(msg));
+const alive = new WeakMap<WebSocket, boolean>();
 
 wss.on('connection', (ws) => {
-  send(ws, { k: 'hello', serverTime: Date.now() });
-  ws.on('message', (raw) => {
-    let msg: ClientMsg;
-    try {
-      msg = JSON.parse(String(raw)) as ClientMsg;
-    } catch {
-      return;
-    }
-    // M0: echo for connectivity checks. Rooms, signaling and relay arrive in M2.
-    if (msg.k === 'echo') send(ws, { k: 'echo', t0: msg.t0, t1: Date.now() });
-  });
+  ws.binaryType = 'nodebuffer';
+  alive.set(ws, true);
+  ws.on('pong', () => alive.set(ws, true));
+  rooms.connect(ws);
+  ws.on('message', (raw) => rooms.message(ws, String(raw)));
+  ws.on('close', () => rooms.disconnect(ws));
+  ws.on('error', () => ws.terminate());
 });
+
+// Detect dead sockets (phones that sleep or lose signal) so the display learns quickly.
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!alive.get(ws)) {
+      ws.terminate();
+      continue;
+    }
+    alive.set(ws, false);
+    ws.ping();
+  }
+}, 5000);
+
+setInterval(() => {
+  const gone = rooms.sweep();
+  if (gone.length) console.log(`[server] expired rooms: ${gone.join(', ')}`);
+}, 30_000);
 
 http.listen(port, () => {
   console.log(`[server] http+ws on :${port}${serveStatic ? ' (serving dist/)' : ' (ws only; Vite serves pages)'}`);

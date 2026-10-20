@@ -2,7 +2,7 @@
 
 Browser game: the laptop renders a 3D table tennis match (Three.js); a phone joins by QR
 code (no install) and becomes a motion-controlled paddle. Built milestone by milestone
-(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M1 done** (playable vs CPU with the mouse).
+(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M2 built** (pairing, QR, WebRTC + relay, phone paddle mirroring). Real-phone verification is pending.
 
 ## Commands
 - Windows PowerShell blocks `npm.ps1`: use `npm.cmd ...` there (or Git Bash / cmd).
@@ -19,7 +19,7 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
   All tuning values are in `engine/config.ts` (the dev panel exposes them).
 - `/display`: laptop app at `/` (`index.html` → `display/main.tsx`). Three.js scene with an explicit rAF loop; React only for menus/overlays.
 - `/controller`: phone app at `/p/:room` (`controller.html` → `controller/main.tsx`)
-- `/server`: Node `http` + `ws`. Rooms, signaling, relay (M2). In dev it only does ws, and Vite serves pages.
+- `/server`: Node `http` + `ws`. `rooms.ts` holds one display + one phone per 4-letter code (10 min idle expiry), forwards WebRTC signaling, and relays peer messages. A ws ping every 5 s drops dead sockets. In dev it only does ws, and Vite serves pages.
 - `/tests`: Vitest
 
 ### Engine (`/engine`)
@@ -40,11 +40,21 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `input/PaddleInput.ts` is the swappable input interface. `MouseInput`: mouse Y = face, click / sideways flick = swing (pace from mouse speed), W/S = top/backspin, A/D = sidespin, Space = toss.
 - `store.ts` + `ui/App.tsx`: React overlays (menu, scoreboard, banners, timing readout, pause, match over).
 
+### Pairing + transport (M2)
+- `shared/protocol.ts`: peer messages (`PhoneMsg`/`DisplayMsg`, short keys) and client↔server messages (create/resume/join/sig/relay).
+- `shared/net/ServerConn.ts`: reconnecting WebSocket. `shared/net/PeerLink.ts`: relay through the server carries traffic as soon as the peer is present. WebRTC (display offers; channels `o` unordered with maxRetransmits 0, and `r` reliable) takes over once open.
+  It reports `relay` if P2P isn't up in 3 s, but still upgrades if P2P connects later. Lossy kinds (`o`, `ping`, `pong`) use `o`. Add `?relay` to either page's URL to force relay.
+- `shared/clock.ts`: phone pings, laptop pongs (t0,t1,t2), and the lowest-RTT sample of 10 wins. Rounds run on connect, on transport change, and every 10 s. The phone reports `{sync: off, rtt}` and the laptop converts phone timestamps with `off`.
+- Laptop: `display/net/PhoneHost.ts` owns the room (it survives reloads via sessionStorage + token) and feeds `display/input/PhoneInput.ts` (paddle = q0⁻¹·q).
+  `runtime.ts`: a phone tap starts a match / resumes / tosses. Losing the phone mid-match auto-pauses and shows the reconnect QR. `st` UI state and `hit` feedback go to the phone.
+- Phone (`/controller`): `orientation.ts` (W3C alpha/beta/gamma → quaternion, pure), `sensors.ts` (iOS permission from the tap, orientation stream, wake lock, portrait lock, vibrate), `session.ts` (join, link, clock sync, 60 Hz `o` stream, calibration), `main.tsx` (screens).
+  Calibration pose: phone upright, screen toward the player. In that pose the device axes equal the paddle axes, so q0⁻¹·q drives the on-screen paddle directly. Motion is judged by events arriving, not by the permission answer.
+
 Routing: `/p/:room` → `controller.html`, via a Vite middleware in dev (`vite.config.ts`) and `server/static.ts` in prod. Both use `CONTROLLER_PATH_RE`.
 
 Conventions: TS strict + `erasableSyntaxOnly` (no enums or parameter properties) because the server runs `.ts`
 directly on Node ≥22.18 type stripping. Import local files with explicit `.ts`/`.tsx` extensions and use `import type` for types.
-Quaternions on the wire are `[x,y,z,w]`. Ask before adding dependencies beyond: vite, typescript, three, react, ws, vitest.
+Quaternions on the wire are `[x,y,z,w]`. Ask before adding dependencies beyond: vite, typescript, three, react, ws, vitest, qrcode-generator.
 
 ## Phone testing over HTTPS
 iOS only exposes motion sensors in a secure context, so plain `http://<lan-ip>:5173` won't do.
@@ -62,10 +72,13 @@ iOS only exposes motion sensors in a secure context, so plain `http://<lan-ip>:5
    Settings → General → About → Certificate Trust Settings. Android: Settings → Security → Install certificate → CA.
 4. `npm run dev` now serves HTTPS automatically when `certs/cert.pem` exists. Open `https://<lan-ip>:5173`.
 
-The `/p/XXXX` page doubles as a connectivity check: secure context, motion API, and server RTT.
+The laptop QR encodes `location.origin`, so open the laptop page via the tunnel URL (not localhost) before scanning. The menu warns when it is on localhost.
+Desktop testing without a phone: open `/p/CODE` in a mobile-sized tab and dispatch `DeviceOrientationEvent`s from the console. The tap on Enable motion must be a real click.
 
 ## Status / known gaps
-- Audio, dev panel, practice mode, phone input: later milestones (M2–M4).
+- Phone swings (swing detection, rotationRate axis/unit adapter, lag-compensated phone hits) are M3. Until then, swings come from the mouse even in phone mode.
+- Not yet verified on a real iPhone/Android, or on cellular. No TURN server: symmetric NATs fall back to the relay by design.
+- Audio, dev panel, practice mode: M3–M4.
 - /design not imported yet (Claude Design needs `/design-login` from an interactive Claude Code session).
   `shared/styles/tokens.css` holds placeholder values until then.
 - The repo lives in OneDrive. Consider excluding `node_modules` from sync.

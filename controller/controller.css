@@ -1,0 +1,30 @@
+html, body, #ui { height: 100%; overscroll-behavior: none; touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+body { margin: 0; }
+h1 { font-family: var(--font-display); margin: 0; font-size: 28px; }
+p { margin: 0; line-height: 1.45; }
+.muted { color: var(--color-text-muted); }
+
+.center { min-height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 16px; padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)); }
+button { font: inherit; border: 0; border-radius: 14px; padding: 14px 18px; background: var(--color-surface); color: var(--color-text); }
+button.primary { background: var(--color-accent); color: #1a1a1a; font-weight: 700; font-size: 18px; }
+button.big { padding: 22px; font-size: 22px; }
+button:disabled { opacity: 0.4; }
+
+.status { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-bad); }
+.dot.p2p { background: var(--color-ok); }
+.dot.relay { background: var(--color-warn); }
+
+.pad { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); touch-action: none; }
+.pad .status { position: absolute; top: max(16px, env(safe-area-inset-top)); left: 16px; }
+.paddle { width: 160px; height: 160px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff6b6b, #c1121f); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); transition: transform 0.12s ease-out; }
+.paddle.pulse { transform: scale(1.15); }
+.hint { font-size: 24px; font-weight: 700; text-align: center; }
+.sub { font-size: 14px; }
+.flash { position: fixed; inset: 0; background: #fff; pointer-events: none; }
+
+.rotate { position: fixed; inset: 0; background: var(--color-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 10; }
+.rotate-icon { font-size: 64px; }
+
+.room-form { display: flex; gap: 8px; }
+.room-form input { flex: 1; min-width: 0; font: inherit; font-size: 24px; letter-spacing: 6px; text-align: center; border-radius: 14px; border: 2px solid var(--color-surface); background: transparent; color: var(--color-text); padding: 10px; }
