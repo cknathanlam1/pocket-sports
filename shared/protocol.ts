@@ -24,7 +24,7 @@ export type PhoneMsg =
   | { k: 'act'; a: MenuAction }
   | { k: 'act'; a: 'set'; key: 'cpuLevel' | 'assist' | 'bestOf'; v: string | number };
 
-export type MenuAction = 'play' | 'start' | 'back' | 'menu' | 'rematch';
+export type MenuAction = 'play' | 'start' | 'back' | 'menu' | 'rematch' | 'practice';
 
 /** What the laptop's menus show, mirrored on the phone so you can set up a match from it. */
 export interface MenuMirror {

@@ -77,10 +77,10 @@ export function PhoneMenu({ s, menu, status }: { s: PhoneSession; menu: MenuMirr
           <span className="pm-ic">▶</span>
           Play vs CPU
         </button>
-        <button className="pm-item" disabled>
+        <button className="pm-item" onClick={() => s.act({ k: 'act', a: 'practice' })}>
           <span className="pm-ic">○</span>
           Practice
-          <span className="pm-soon">SOON</span>
+          <span className="pm-soon">BALL MACHINE</span>
         </button>
       </div>
       <div className="script pm-summary">{summary}</div>

@@ -20,7 +20,7 @@ export function Menu({ rt }: { rt: Runtime }) {
   const { settings, settingsOpen, phone } = useUi();
   const items = [
     { t: 'Play vs CPU', s: `Best of ${settings.bestOf}`, ic: '▶', primary: true, on: () => rt.go('setup') },
-    { t: 'Practice', s: 'No score', ic: '○', on: () => store.toast('Practice mode is coming soon', 'i') },
+    { t: 'Practice', s: 'Ball machine', ic: '○', on: () => rt.startPractice() },
     { t: 'Customize', s: 'Look & outfit', ic: '☺', on: () => rt.go('customize') },
     { t: 'Settings', s: 'Sound · Assist', ic: '⚙', on: () => store.set({ settingsOpen: true }) },
   ];
@@ -71,7 +71,7 @@ export function Menu({ rt }: { rt: Runtime }) {
 }
 
 function Settings() {
-  const { settings } = useUi();
+  const { settings, audio } = useUi();
   const set = (p: Partial<MenuSettings>) => store.set({ settings: { ...settings, ...p } });
   return (
     <div className="sheet-scrim" onClick={() => store.set({ settingsOpen: false })} data-ui>
@@ -93,9 +93,32 @@ function Settings() {
         <div className="setting-row">
           <div>
             <div className="row-title">Sound</div>
-            <div className="row-desc">Coming with the audio pass.</div>
+            <div className="row-desc">Hits, bounces, crowd and music stings.</div>
           </div>
-          <div className="soon-chip">SOON</div>
+          <div className="seg-row" style={{ alignItems: 'center' }}>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={audio.volume}
+              aria-label="Volume"
+              onChange={(e) => store.set({ audio: { ...audio, volume: +e.target.value, muted: false } })}
+              style={{ width: 160 }}
+            />
+            <button className={`seg small ${audio.muted ? 'on' : ''}`} aria-pressed={audio.muted} onClick={() => store.set({ audio: { ...audio, muted: !audio.muted } })}>
+              {audio.muted ? 'Muted' : 'Mute'}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div>
+            <div className="row-title">Quick lesson</div>
+            <div className="row-desc">Timing, paddle tilt and spin, in under a minute.</div>
+          </div>
+          <button className="btn small" onClick={() => store.set({ screen: 'tutorial', settingsOpen: false })}>
+            Replay lesson
+          </button>
         </div>
         <div className="setting-row">
           <div>

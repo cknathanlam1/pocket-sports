@@ -8,7 +8,7 @@ import { Stage, Wash } from '../Stage.tsx';
 import { Confetti } from './Hud.tsx';
 
 export function Paused({ rt }: { rt: Runtime }) {
-  const { pauseReason, phone, hud, usingPhone } = useUi();
+  const { pauseReason, phone, hud, usingPhone, mode } = useUi();
   if (pauseReason === 'phone') return <ConnectionLost rt={rt} />;
   return (
     <>
@@ -29,11 +29,11 @@ export function Paused({ rt }: { rt: Runtime }) {
               </button>
             )}
             <button className="btn" onClick={() => rt.quitToMenu()}>
-              Quit to menu
+              {mode === 'practice' ? 'End practice' : 'Quit to menu'}
             </button>
           </div>
         </div>
-        {hud && <div className="paused-score">{hud.points.join(' – ')}</div>}
+        {hud && mode === 'match' && <div className="paused-score">{hud.points.join(' – ')}</div>}
       </Stage>
     </>
   );

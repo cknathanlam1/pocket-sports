@@ -85,7 +85,10 @@ function canvasTexture(w: number, h: number, draw: (ctx: CanvasRenderingContext2
 interface Avatar {
   root: THREE.Group;
   body: THREE.Group;
+  armL: THREE.Group;
   armR: THREE.Group;
+  /** Celebration pose until `until` (world clock, s). */
+  pose: { kind: 'cheer' | 'sad'; until: number } | null;
   paddle: THREE.Group;
   mats: { outfit: THREE.MeshToonMaterial[]; skin: THREE.MeshToonMaterial[]; hair: THREE.MeshToonMaterial };
 }
@@ -105,6 +108,12 @@ export class World {
   private shakeHits = 0;
   private clock = 0;
   private palms: THREE.Group[] = [];
+  private machine: THREE.Group;
+  private practice = false;
+  private rings: Array<{ mesh: THREE.Mesh; t: number }> = [];
+  private sparks: Array<{ mesh: THREE.Mesh; t: number }> = [];
+  private squashT = Infinity;
+  private pool: THREE.MeshBasicMaterial[] = [];
 
   constructor() {
     const s = this.scene;
@@ -125,6 +134,7 @@ export class World {
     this.buildVenue();
     this.buildTable();
     this.avatars = [this.buildAvatar(0), this.buildAvatar(1)];
+    this.machine = this.buildMachine();
 
     // Ball: sun yellow + ink outline + highlight, always-on blob shadow, four ghosts for the trail.
     const ballGeo = new THREE.SphereGeometry(BALL_VIS_R, 20, 14);
@@ -175,7 +185,9 @@ export class World {
 
     // Pool strips left and right, white coping, two floats.
     for (const x of [-4.4, 4.4]) {
-      const pool = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 14), new THREE.MeshBasicMaterial({ color: C.pool }));
+      const poolMat = new THREE.MeshBasicMaterial({ color: C.pool });
+      this.pool.push(poolMat);
+      const pool = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 14), poolMat);
       pool.rotation.x = -Math.PI / 2;
       pool.position.set(x, 0.006, 0);
       s.add(pool);
@@ -366,7 +378,7 @@ export class World {
 
     const paddle = this.buildPaddle(side === 0 ? C.p1 : C.p2, side === 0 ? 'circle' : 'diamond');
     this.scene.add(paddle);
-    return { root, body, armR, paddle, mats: { outfit: [outfit, sleeve], skin: [skinA, skinB], hair } };
+    return { root, body, armL, armR, pose: null, paddle, mats: { outfit: [outfit, sleeve], skin: [skinA, skinB], hair } };
   }
 
   /** Oversized round face, white rim, wood grip, white ●/◆ marker. Face normal −z in local space. */
@@ -385,6 +397,93 @@ export class World {
     const handle = outlined(new THREE.BoxGeometry(0.032, 0.11, 0.024), toon(C.wood), 1.12);
     paddle.add(rim, face, mk, handle);
     return paddle;
+  }
+
+/** Practice ball machine: a chunky coral box with a lagoon barrel, at the far end. */
+  private buildMachine(): THREE.Group {
+    const g = new THREE.Group();
+    const body = outlined(new THREE.BoxGeometry(0.5, 0.55, 0.45), toon(0xe57a58), 1.04);
+    body.position.y = TABLE_TOP + 0.05;
+    const legs = outlined(new THREE.CylinderGeometry(0.04, 0.04, TABLE_TOP - 0.2, 8), toon(0x10285a), 1.1);
+    legs.position.y = (TABLE_TOP - 0.2) / 2;
+    const barrel = outlined(new THREE.CylinderGeometry(0.07, 0.09, 0.32, 16).rotateX(Math.PI / 2), toon(0x5ccfe0), 1.08);
+    barrel.position.set(0, TABLE_TOP + 0.3, 0.2);
+    const hopper = outlined(new THREE.CylinderGeometry(0.22, 0.12, 0.25, 16), toon(0xfffdf8), 1.05);
+    hopper.position.y = TABLE_TOP + 0.45;
+    for (let i = 0; i < 5; i++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), new THREE.MeshBasicMaterial({ color: C.ball }));
+      b.position.set(Math.cos(i * 1.3) * 0.1, TABLE_TOP + 0.58, Math.sin(i * 1.3) * 0.1);
+      g.add(b);
+    }
+    g.add(body, legs, barrel, hopper);
+    g.position.set(0, 0, -(HALF_L + 0.45));
+    g.visible = false;
+    this.scene.add(g);
+    return g;
+  }
+
+  /** Practice mode: show the ball machine instead of Marlo. */
+  setPractice(on: boolean): void {
+    this.practice = on;
+    this.machine.visible = on;
+    this.avatars[1].root.visible = !on;
+    this.avatars[1].paddle.visible = !on;
+  }
+
+  /** Point reaction (design 7b): cheer = arms up + hop, sad = slump. Held ≥ 300 ms. */
+  pose(side: Side, kind: 'cheer' | 'sad', seconds = 1.4): void {
+    this.avatars[side].pose = { kind, until: this.clock + seconds };
+  }
+
+  /** Expanding ring where the ball hits the table. */
+  bounceRing(x: number, z: number): void {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.04, 0.06, 28), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(x, TABLE_TOP + 0.003, z);
+    this.scene.add(m);
+    this.rings.push({ mesh: m, t: 0 });
+    this.squashT = 0;
+  }
+
+  /** Star spark at the contact point. */
+  spark(x: number, y: number, z: number, big: boolean): void {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(big ? 0.16 : 0.09, 5), new THREE.MeshBasicMaterial({ color: big ? 0xffd23f : 0xffffff, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
+    m.position.set(x, y, z);
+    m.lookAt(this.camera.position);
+    this.scene.add(m);
+    this.sparks.push({ mesh: m, t: 0 });
+  }
+
+  private updateFx(dt: number): void {
+    for (const r of this.rings) {
+      r.t += dt;
+      const k = r.t / 0.45;
+      r.mesh.scale.setScalar(1 + k * 4);
+      (r.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 * (1 - k));
+    }
+    for (const sp of this.sparks) {
+      sp.t += dt;
+      const k = sp.t / 0.25;
+      sp.mesh.scale.setScalar(0.6 + k * 1.2);
+      sp.mesh.rotation.z += dt * 6;
+      (sp.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k);
+    }
+    for (const list of [this.rings, this.sparks]) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i]!.t > 0.5) {
+          this.scene.remove(list[i]!.mesh);
+          list[i]!.mesh.geometry.dispose();
+          list.splice(i, 1);
+        }
+      }
+    }
+    // Ball squash for 70 ms after a bounce.
+    this.squashT += dt;
+    const sq = this.squashT < 0.07 ? 1 - 0.35 * Math.sin((this.squashT / 0.07) * Math.PI) : 1;
+    this.ball.scale.set(1 + (1 - sq) * 0.5, sq, 1 + (1 - sq) * 0.5);
+    // Gentle pool shimmer.
+    const sh = 0.5 + 0.5 * Math.sin(this.clock * 1.3);
+    for (const m of this.pool) m.color.setRGB(0.36 + sh * 0.04, 0.81 + sh * 0.03, 0.88 + sh * 0.02);
   }
 
   setLooks(near: Look, far: Look): void {
@@ -432,6 +531,7 @@ export class World {
     });
 
     for (const side of [0, 1] as const) this.syncAvatar(game, side, side === 0 ? humanQ : null);
+    this.updateFx(dt);
     for (const [i, p] of this.palms.entries()) p.rotation.x = Math.sin(this.clock * 0.8 + i) * 0.02;
     this.updateCamera(game, dt);
   }
@@ -444,9 +544,29 @@ export class World {
     const sinceSwing = (game.simTime - p.swingAt) / game.cfg.physics.gameSpeed;
     const swingAnim = sinceSwing >= 0 && sinceSwing < 0.3 ? Math.sin((sinceSwing / 0.3) * Math.PI) : 0;
     // Ready bounce + swing squash.
-    a.body.position.y = Math.abs(Math.sin(this.clock * 4 + side)) * 0.025;
+    const pose = a.pose && this.clock < a.pose.until ? a.pose.kind : null;
+    if (pose === 'cheer') {
+      // Arms up, hop.
+      a.body.position.y = Math.abs(Math.sin(this.clock * 9)) * 0.16;
+      a.body.rotation.x = 0;
+      a.armL.rotation.z = 2.6;
+      a.armR.rotation.z = -2.6;
+      a.armR.rotation.x = 0;
+    } else if (pose === 'sad') {
+      // Slump forward, arms hang.
+      a.body.position.y = -0.03;
+      a.body.rotation.x = 0.22;
+      a.armL.rotation.z = 0.08;
+      a.armR.rotation.z = -0.08;
+      a.armR.rotation.x = 0;
+    } else {
+      a.body.position.y = Math.abs(Math.sin(this.clock * 4 + side)) * 0.025;
+      a.body.rotation.x = 0;
+      a.armL.rotation.z = 0.25;
+      a.armR.rotation.z = -0.4;
+      a.armR.rotation.x = -swingAnim * 1.2;
+    }
     a.body.scale.set(1 + swingAnim * 0.04, 1 - swingAnim * 0.04, 1);
-    a.armR.rotation.x = -swingAnim * 1.2;
 
     // Paddle at the hand: forehand to the player's right, backhand to the left.
     const handSide = p.forehand ? 1 : -1;

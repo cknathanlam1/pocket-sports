@@ -1,12 +1,13 @@
 // Owns the renderer, the world, the input sources and the current Game; runs the frame loop and
 // the screen flow (pairing → calibrate → menu → setup → match → results).
 import * as THREE from 'three';
-import { Game, type GameEvent } from '../engine/game.ts';
-import { type Side, other } from '../engine/physics.ts';
+import { Game, type GameEvent, type MachineSettings } from '../engine/game.ts';
+import { HALF_W, type Side, other } from '../engine/physics.ts';
 import type { PointReason } from '../engine/referee.ts';
 import { gamesToWin } from '../engine/rules.ts';
 import { MARLO_LOOK } from '../shared/art/Char.tsx';
 import type { HitTier, MenuMirror, UiState } from '../shared/protocol.ts';
+import { sfx } from './audio/Sfx.ts';
 import { loadConfig } from './devConfig.ts';
 import { MouseInput } from './input/MouseInput.ts';
 import type { PaddleInput, Swing } from './input/PaddleInput.ts';
@@ -51,6 +52,10 @@ export class Runtime {
   private lastPoint: 'won' | 'lost' | 'let' | undefined;
   private lastHitKmh: [number, number] = [0, 0];
   private calibrateTimer: ReturnType<typeof setTimeout> | undefined;
+  private oohDone = false;
+  private weakWarned = false;
+  /** Tutorial screen listens to swings instead of the game. */
+  private swingTap: ((s: Swing) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -66,7 +71,12 @@ export class Runtime {
 
     this.game = this.newAttractGame();
     this.applyLooks();
-    store.subscribe(() => this.applyLooks());
+    store.subscribe(() => {
+      this.applyLooks();
+      const a = store.get().audio;
+      sfx.setVolume(a.volume, a.muted);
+    });
+    sfx.setVolume(store.get().audio.volume, store.get().audio.muted);
 
     // Both input sources stay live: the mouse is the dev/fallback swing source while phone swings land in M3.
     for (const input of [this.mouse, this.host.input] as PaddleInput[]) {
@@ -88,6 +98,7 @@ export class Runtime {
       else if (act.a === 'start' && screen === 'setup') this.startMatch(settings);
       else if (act.a === 'rematch' && screen === 'matchOver') this.startMatch(settings);
       else if (act.a === 'menu' && screen === 'matchOver') this.quitToMenu();
+      else if (act.a === 'practice' && screen === 'menu') this.startPractice();
     });
 
     this.host.onStatus((s) => this.onPhoneStatus(s));
@@ -120,7 +131,13 @@ export class Runtime {
         if (store.get().screen === 'pairing' && this.host.status.phone === 'connected') this.go('calibrate');
       }, 1400);
     }
-    if (s.phone === 'calibrated' && (screen === 'pairing' || screen === 'calibrate' || screen === 'title')) this.go('menu');
+    if (s.phone === 'calibrated' && (screen === 'pairing' || screen === 'calibrate' || screen === 'title')) this.go(store.get().tutorialDone ? 'menu' : 'tutorial');
+    if (prev.transport === 'none' && s.transport !== 'none') sfx.connect();
+    if (prev.transport !== 'none' && s.transport === 'none') sfx.disconnect();
+    if (store.get().usingPhone && s.rtt !== null && s.rtt > 150 && !this.weakWarned) {
+      this.weakWarned = true;
+      store.toast('Weak connection — move closer to Wi‑Fi', '!', 'warn');
+    }
     if (prev.phone !== 'none' && s.phone === 'none' && !store.get().usingPhone) store.toast('Phone disconnected', '!', 'warn');
     // Phone dropped mid-match → auto-pause with the reconnect card (2r).
     if (store.get().usingPhone && s.phone !== 'calibrated' && store.get().screen === 'playing') this.pause('phone');
@@ -135,7 +152,26 @@ export class Runtime {
     store.set({ screen, settingsOpen: false });
   }
 
+  /** Route swings to a listener (tutorial) instead of the game. Returns an unsubscribe. */
+  tapSwings(cb: (s: Swing) => void): () => void {
+    this.swingTap = cb;
+    return () => {
+      if (this.swingTap === cb) this.swingTap = null;
+    };
+  }
+
+  /** Live paddle face angle in degrees (+ = open), from the phone if calibrated, else the mouse. */
+  liveFaceDeg(): number {
+    if (this.phoneReady) {
+      const q = this.host.input.orientation();
+      const [x, y, z, w] = q;
+      return (-Math.asin(Math.max(-1, Math.min(1, 2 * (y * z - w * x)))) * 180) / Math.PI;
+    }
+    return (this.mouse.face() * 180) / Math.PI;
+  }
+
   private onSwing(s: Swing): void {
+    if (this.swingTap) return this.swingTap(s);
     if (this.attract || store.get().screen !== 'playing') return;
     const r = this.game.swing(0, (performance.now() - s.t) / 1000, s);
     if (r.result !== 'none' && r.offsetMs !== undefined)
@@ -182,7 +218,40 @@ export class Runtime {
     this.lastPoint = undefined;
     this.game = new Game({ ...s, controllers: ['human', 'cpu'], initialServer: Math.random() < 0.5 ? 0 : 1 }, this.cfg);
     this.hudSig = '';
+    this.oohDone = false;
+    store.set({ mode: 'match' });
+    this.world.setPractice(false);
     this.applyLooks();
+  }
+
+  /** Practice: ball machine on the far side, live-adjustable, no score. */
+  startPractice(): void {
+    const { settings, machine } = store.get();
+    store.set({
+      screen: 'playing',
+      mode: 'practice',
+      banner: null,
+      timing: null,
+      hitFx: null,
+      celebrate: null,
+      matchPoint: null,
+      usingPhone: this.phoneReady,
+      pauseReason: null,
+      settingsOpen: false,
+      practice: { streak: 0, best: 0, good: 0, total: 0, last: null },
+    });
+    this.attract = false;
+    this.game = new Game({ ...settings, controllers: ['human', 'machine'], mode: 'practice', machine: { ...machine } }, this.cfg);
+    this.hudSig = '';
+    this.world.setPractice(true);
+    this.applyLooks();
+  }
+
+  /** Change ball-machine settings (applies to the next feed). */
+  setMachine(patch: Partial<MachineSettings>): void {
+    const machine = { ...store.get().machine, ...patch };
+    store.set({ machine });
+    if (this.game.isPractice) Object.assign(this.game.machine, machine);
   }
 
   pause(reason: 'user' | 'phone'): void {
@@ -198,7 +267,8 @@ export class Runtime {
   quitToMenu(): void {
     this.attract = true;
     this.game = this.newAttractGame();
-    store.set({ screen: 'menu', hud: null, banner: null, timing: null, hitFx: null, celebrate: null, usingPhone: false, pauseReason: null, matchPoint: null });
+    store.set({ screen: 'menu', mode: 'match', hud: null, banner: null, timing: null, hitFx: null, celebrate: null, usingPhone: false, pauseReason: null, matchPoint: null });
+    this.world.setPractice(false);
     this.applyLooks();
   }
 
@@ -222,6 +292,7 @@ export class Runtime {
     const q = this.phoneReady ? this.host.input.orientation() : this.attract ? null : this.mouse.orientation();
     this.world.sync(this.game, q, dt);
     this.renderer.render(this.world.scene, this.world.camera);
+    if (sfx.ready) sfx.startAmbience();
     if (!this.attract) this.publishHud();
     this.publishUiState();
     requestAnimationFrame(this.frame);
@@ -267,15 +338,25 @@ export class Runtime {
 
   private handleEvents(events: GameEvent[]): void {
     for (const e of events) {
+      const pan = Math.max(-1, Math.min(1, this.game.ball.p.x / HALF_W));
       if (e.type === 'hit') this.onHit(e);
-      else if (e.type === 'point') this.onPoint(e.winner, e.reason);
+      else if (e.type === 'bounce') {
+        sfx.bounce(e.speed, pan);
+        this.world.bounceRing(this.game.ball.p.x, this.game.ball.p.z);
+      } else if (e.type === 'net') sfx.net(e.kind, pan);
+      else if (e.type === 'practice') this.onPractice(e);
+      else if (e.type === 'point' && !this.game.isPractice) this.onPoint(e.winner, e.reason);
       else if (e.type === 'let') {
         this.lastPoint = 'let';
         this.banner({ kind: 'let', icon: '↺', text: 'Let', sub: 'Replay the serve' });
       } else if (e.type === 'game' && this.game.winner === null) {
         const [a, b] = this.game.score.history.at(-1) ?? [0, 0];
         this.banner({ kind: 'game', icon: e.winner === 0 ? '✓' : '✕', text: e.winner === 0 ? 'Game!' : 'Game: Marlo', sub: `${a}–${b}` });
-      } else if (e.type === 'match') store.set({ winner: e.winner });
+      } else if (e.type === 'match') {
+        store.set({ winner: e.winner });
+        if (e.winner === 0) sfx.win();
+        else sfx.pointLost();
+      }
     }
     if (this.game.phase === 'matchOver' && store.get().screen === 'playing') {
       const stats = store.get().stats;
@@ -284,8 +365,25 @@ export class Runtime {
     }
   }
 
+  private onPractice(e: Extract<GameEvent, { type: 'practice' }>): void {
+    const g = this.game.practice;
+    store.set({ practice: { ...g, last: { key: ++this.key, result: e.result } } });
+    if (e.result === 'good') {
+      sfx.uiSelect();
+      if (e.streak > 0 && e.streak % 10 === 0) sfx.clap(1.2);
+    }
+  }
+
   private onHit(e: Extract<GameEvent, { type: 'hit' }>): void {
     const kmh = Math.round(e.speed * 3.6);
+    const b = this.game.ball.p;
+    const pan = Math.max(-1, Math.min(1, b.x / HALF_W));
+    if (this.game.isPractice && e.side === 1) sfx.machine();
+    else sfx.hit(kmh, pan);
+    if (!this.oohDone && this.game.rallyShots >= 8 && !this.game.isPractice) {
+      this.oohDone = true;
+      sfx.ooh();
+    }
     this.lastHitKmh[e.side] = kmh;
     const stats = store.get().stats;
     const st = [...stats] as typeof stats;
@@ -294,6 +392,7 @@ export class Runtime {
     if (e.side !== 0) return;
     const tier = hitTier(kmh, e.offsetMs);
     const fx = TIER_FX[tier];
+    this.world.spark(b.x, b.y, b.z, tier !== 'nice');
     this.freezeUntil = performance.now() + fx.stopMs;
     if (fx.shake) this.world.shake(fx.shake, fx.hits);
     store.set({ hitFx: { key: ++this.key, tier, kmh } });
@@ -304,6 +403,11 @@ export class Runtime {
     const g = this.game;
     const won = winner === 0;
     this.lastPoint = won ? 'won' : 'lost';
+    this.oohDone = false;
+    this.world.pose(winner, 'cheer');
+    this.world.pose(other(winner), 'sad');
+    if (won) sfx.clap(1);
+    else sfx.pointLost();
     // Winners = the opponent failed to return; errors = the hitter put it out / into the net.
     const st = [...store.get().stats] as ReturnType<typeof store.get>['stats'];
     if (reason === 'missed return' || reason === 'double bounce') st[winner] = { ...st[winner], winners: st[winner].winners + 1 };
@@ -318,6 +422,8 @@ export class Runtime {
     store.set({ matchPoint: mp });
 
     if (won && (rally >= 8 || kmh >= 55)) store.set({ celebrate: { key: ++this.key, line: `${rally}-hit rally · ${kmh} km/h winner` } });
+    if (deuce) sfx.deuce();
+    else if (mp !== null) sfx.matchPoint();
     if (deuce) this.banner({ kind: 'deuce', icon: '=', text: 'Deuce', sub: 'Win two points in a row' });
     else if (mp !== null) this.banner({ kind: 'matchpoint', icon: '★', text: mp === 0 ? 'Match point' : 'Match point: Marlo', sub: mp === 0 ? 'One point to win it all' : 'Hang in there' });
     else if (won) this.banner({ kind: 'won', icon: '✓', text: 'Point!', sub: reason === 'missed return' || reason === 'double bounce' ? `Winner · ${kmh} km/h` : `Marlo: ${LOST_REASON[reason].toLowerCase()}` });

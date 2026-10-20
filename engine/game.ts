@@ -20,7 +20,17 @@ import { type BestOf, type Score, awardPoint, currentServer, newScore } from './
 import { type ShotError, type SwingFeatures, type TimingClass, classifyTiming, humanIntent, resolveShot } from './shot.ts';
 import { type V3, clamp, len, v3 } from './vec.ts';
 
-export type Controller = 'human' | 'cpu';
+export type Controller = 'human' | 'cpu' | 'machine';
+
+/** Practice ball machine (side 1). Speed is horizontal pace in m/s. */
+export interface MachineSettings {
+  speed: number;
+  spin: 'none' | 'top' | 'back' | 'side' | 'mixed';
+  placement: 'forehand' | 'middle' | 'backhand' | 'random';
+  intervalMs: number;
+}
+
+export type PracticeResult = 'good' | 'miss' | 'out' | 'net';
 export type Phase = 'serve' | 'toss' | 'rally' | 'pointOver' | 'matchOver';
 
 export interface GameSettings {
@@ -31,6 +41,9 @@ export interface GameSettings {
   controllers: [Controller, Controller];
   initialServer?: Side;
   seed?: number;
+  /** 'practice': side 1 is a ball machine, no score; returns build a streak. */
+  mode?: 'match' | 'practice';
+  machine?: MachineSettings;
 }
 
 export type GameEvent =
@@ -43,7 +56,8 @@ export type GameEvent =
   | { type: 'point'; winner: Side; reason: PointReason }
   | { type: 'let' }
   | { type: 'game'; winner: Side }
-  | { type: 'match'; winner: Side };
+  | { type: 'match'; winner: Side }
+  | { type: 'practice'; result: PracticeResult; streak: number; best: number };
 
 export interface Player {
   x: number;
@@ -105,6 +119,8 @@ export class Game {
   rallyShots = 0;
   /** Lengths of completed rallies, for stats/tests. */
   rallies: number[] = [];
+  /** Practice mode tallies. */
+  practice = { streak: 0, best: 0, good: 0, total: 0 };
 
   private acc = 0;
   private pauseLeft = 0; // real seconds
@@ -131,7 +147,16 @@ export class Game {
   }
 
   get server(): Side {
-    return currentServer(this.score);
+    return this.isPractice ? 1 : currentServer(this.score);
+  }
+
+  get isPractice(): boolean {
+    return this.settings.mode === 'practice';
+  }
+
+  /** Live-adjustable machine settings (practice mode). */
+  get machine(): MachineSettings {
+    return (this.settings.machine ??= { speed: 6, spin: 'none', placement: 'middle', intervalMs: 900 });
   }
 
   drainEvents(): GameEvent[] {
@@ -162,7 +187,10 @@ export class Game {
 
     if (this.phase === 'serve') {
       this.holdBall();
-      if (this.simTime >= this.serveAt) this.toss(this.server, true);
+      if (this.simTime >= this.serveAt) {
+        if (this.isPractice) this.machineFeed();
+        else this.toss(this.server, true);
+      }
     } else if (this.ballLive) {
       this.advanceBall();
     }
@@ -198,6 +226,20 @@ export class Game {
       return;
     }
     if (this.rallyShots > 0) this.rallies.push(this.rallyShots);
+    if (this.isPractice && v.kind === 'point') {
+      const human = this.rallyShots >= 2;
+      const result: PracticeResult = v.winner === 0 ? 'good' : human && (v.reason === 'out' || v.reason === 'net') ? v.reason : 'miss';
+      const p = this.practice;
+      p.total++;
+      if (result === 'good') {
+        p.good++;
+        p.streak++;
+        p.best = Math.max(p.best, p.streak);
+      } else p.streak = 0;
+      this.events.push({ type: 'practice', result, streak: p.streak, best: p.best });
+      this.pause(0.5);
+      return;
+    }
     if (v.kind === 'let') {
       this.lastPoint = { winner: null, reason: 'let' };
       this.events.push({ type: 'let' });
@@ -231,6 +273,7 @@ export class Game {
   // ───────────────────────── Serving ─────────────────────────
 
   private serveHand(): V3 {
+    if (this.isPractice) return v3(0, TABLE_TOP + 0.32, -(HALF_L + 0.25)); // machine mouth
     const s = this.server;
     return v3(this.players[s].x + HAND_OFFSET * 0.5 * sideSign(s), TABLE_TOP + 0.15, sideSign(s) * (HALF_L + 0.2));
   }
@@ -257,6 +300,11 @@ export class Game {
     this.players[s].x = this.players[s].targetX;
     this.players[s].z = this.players[s].targetZ;
     this.holdBall();
+    if (this.isPractice) {
+      this.players[1].x = this.players[1].targetX = 0;
+      this.serveAt = this.simTime + (this.machine.intervalMs / 1000) * this.cfg.physics.gameSpeed;
+      return;
+    }
     this.serveAt = this.settings.controllers[s] === 'cpu' ? this.simTime + (this.cfg.serve.cpuDelayMs / 1000) * this.cfg.physics.gameSpeed : Infinity;
   }
 
@@ -274,6 +322,25 @@ export class Game {
     this.contact = this.predictTossContact(side);
     this.events.push({ type: 'toss', side });
     return true;
+  }
+
+  /** Ball machine: launch the next practice ball at the near half. */
+  private machineFeed(): void {
+    const m = this.machine;
+    const r = this.rng;
+    const x = { forehand: 0.45, middle: 0, backhand: -0.45, random: (r.next() * 2 - 1) * 0.55 }[m.placement];
+    const depth = 0.75 + r.next() * 0.4;
+    const kind = m.spin === 'mixed' ? (['none', 'top', 'back', 'side'] as const)[Math.floor(r.next() * 4)]! : m.spin;
+    const topspin = kind === 'top' ? 150 : kind === 'back' ? -120 : 0;
+    const sidespin = kind === 'side' ? (r.next() < 0.5 ? -100 : 100) : 0;
+    const mouth = this.serveHand();
+    const shot = resolveShot(mouth, { target: { x, z: depth }, hSpeed: m.speed, topspin, sidespin }, { hitter: 1, isServe: false, scatter: 0.03, pullBack: 1, errorPullBack: 0, error: 'none' }, this.cfg, r);
+    this.ballLive = true;
+    this.ring = [{ t: this.simTime, ball: cloneBall(shot.ball) }];
+    this.serveAt = Infinity;
+    // A machine feed is a rally ball, not a serve: it only has to bounce on the near half.
+    this.referee.struck = true;
+    this.strike(1, shot.ball, this.simTime, false);
   }
 
   private predictTossContact(side: Side): Contact {

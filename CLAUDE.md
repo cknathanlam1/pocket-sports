@@ -2,7 +2,7 @@
 
 Browser game: the laptop renders a 3D table tennis match (Three.js); a phone joins by QR
 code (no install) and becomes a motion-controlled paddle. Built milestone by milestone
-(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M3 built** (phone swing detection, lag-compensated phone hits, dev panel, sensor recording + replay tests) on top of the Claude Design reskin. Real-phone verification is pending.
+(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M4 built** (procedural audio, practice ball machine, quick-lesson tutorial, point poses + table/hit VFX) on top of M3 phone swings and the Claude Design reskin. Real-phone verification is pending.
 
 ## Commands
 - Windows PowerShell blocks `npm.ps1`: use `npm.cmd ...` there (or Git Bash / cmd).
@@ -50,7 +50,18 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
   Phone taps still work on the laptop screens too (menu → setup → start); the pause button toggles pause.
   The near player is rendered see-through (`ghost()` in `scene/World.ts`) so the ball stays visible behind them. Hit tiers: Nice < 35 km/h, Great 35–55, SMASH 55+ or |timing| < 20 ms
   (hit-stop 40/80 ms, camera shake, flash). In dev, `window.pocketStore` exposes the UI store.
-- Not built yet from the design: tutorial 2d–2f (needs phone swings, M3), practice mode and sound (M4), 3D poses beyond swing (cheer/sad).
+### M4: audio, practice, tutorial, feedback
+- `display/audio/Sfx.ts`: Web Audio, fully procedural (oscillators + filtered noise, no sample files). The context unlocks on the first click/key.
+  Sounds follow design/SPEC.md: hit layers by speed (tock/tick/crack, pitch rises with power), bounce "pok" panned by ball x, net thud/tick, ball machine,
+  crowd ambience + claps on a won point + "ooh" at rally 8 + cheer on a win, marimba UI blips (any `#ui button`), connect/disconnect two-notes, deuce drumroll, match-point pulse, win jingle.
+  Volume/mute live in Settings (`store.audio`, persisted).
+- Practice (`Game` with `mode: 'practice'`, controllers `['human', 'machine']`): the machine feeds rally balls from the far end (speed, spin none/top/back/side/mix,
+  placement BH/Mid/FH/random, pace). Feeds count as rally balls, not serves. No score: `practice` events give a good/miss/out/net result plus streak and best.
+  `ui/screens/Practice.tsx` has the streak card and live machine controls (`rt.setMachine`, persisted). Start it from the laptop menu or the phone menu.
+- Tutorial 2d–2f (`ui/screens/Tutorial.tsx`): shown once after the first calibration (`store.tutorialDone`), replayable from Settings. Steps: timing (swing as a sweeping
+  ball crosses the green zone, 2×), tilt (live face angle, swing with an open face), spin (brush-up swing → path in the topspin zone). Uses `rt.tapSwings` so swings bypass the game; works with the mouse too.
+- 3D feedback (`scene/World.ts`): cheer/sad poses on every point (held 1.4 s), bounce rings, hit sparks (star on Great/SMASH), ball squash on bounce, pool shimmer, ball-machine model in practice.
+- Toasts: weak connection (phone RTT > 150 ms, once per session), phone disconnected.
 
 ### Pairing + transport (M2)
 - `shared/protocol.ts`: peer messages (`PhoneMsg`/`DisplayMsg`, short keys) and client↔server messages (create/resume/join/sig/relay).
@@ -105,7 +116,5 @@ Desktop testing without a phone: open `/p/CODE` in a mobile-sized tab and dispat
 - Mouse swings still work alongside the phone (useful for testing).
 - Testing in the hidden Claude browser pane throttles rAF, and with the 0.1 s frame clamp the game then runs slower than real time. Judge timing feel on a real, visible screen.
 - Not yet verified on a real iPhone/Android, or on cellular. No TURN server: symmetric NATs fall back to the relay by design.
-- Audio, dev panel, practice mode: M3–M4.
-- /design not imported yet (Claude Design needs `/design-login` from an interactive Claude Code session).
-  `shared/styles/tokens.css` holds placeholder values until then.
+- Still primitives, not GLTF: characters, venue and props are toon-shaded Three.js primitives (design/SPEC.md has the asset list for real models).
 - The repo lives in OneDrive. Consider excluding `node_modules` from sync.

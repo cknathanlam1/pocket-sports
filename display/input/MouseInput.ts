@@ -68,7 +68,8 @@ export class MouseInput implements PaddleInput {
     return Math.hypot(v.x, v.y);
   }
 
-  private face(): number {
+  /** Current face angle from mouse Y (rad, + = open). */
+  face(): number {
     return (0.5 - this.ny) * 2 * FACE_MAX;
   }
 
