@@ -1,0 +1,16 @@
+/* PLACEHOLDER tokens until /design is imported. Replace with the design system's
+   tokens/colors.css and tokens/fonts.css. Keep variable names stable across the app. */
+:root {
+  --color-bg: #0b1d2a;
+  --color-surface: #12324a;
+  --color-text: #f4f7fa;
+  --color-text-muted: #9fb3c4;
+  --color-accent: #ffb703;
+  --color-ok: #3ccf91;
+  --color-warn: #ffb703;
+  --color-bad: #ff5a5f;
+  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --radius: 12px;
+}
+html, body { margin: 0; height: 100%; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); }
