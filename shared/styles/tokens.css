@@ -1,16 +1,48 @@
-/* PLACEHOLDER tokens until /design is imported. Replace with the design system's
-   tokens/colors.css and tokens/fonts.css. Keep variable names stable across the app. */
+/* Pocket Sports tokens: the Ensembl design system (design/tokens, copied into ./ds) plus the
+   game tokens from design/SPEC.md. The fonts import must come first. */
+@import './fonts.css';
+@import './ds/colors.css';
+@import './ds/typography.css';
+@import './ds/spacing.css';
+@import './ds/effects.css';
+@import './ds/base.css';
+
 :root {
-  --color-bg: #0b1d2a;
-  --color-surface: #12324a;
-  --color-text: #f4f7fa;
-  --color-text-muted: #9fb3c4;
-  --color-accent: #ffb703;
-  --color-ok: #3ccf91;
-  --color-warn: #ffb703;
-  --color-bad: #ff5a5f;
-  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --radius: 12px;
+  /* Game */
+  --p1: #2F6FDB;
+  --p2: #FF8A1F;
+  --ball: #FFD23F;
+  --table: #1FA59B;
+  --table-edge: #137A73;
+  --pool: #5CCFE0;
+  --sand: #F6DDB0;
+  --sky: #9FD8FF;
+  --win: #2E8B57;
+  --win-bright: #5DC265;
+  --lose: #D65F3A;
+  --phone-bg: #1B4AA8;
+  --ink: var(--ink-900);
+  --coral-vivid: var(--coral-400);
+  --lagoon: #5CCFE0;
+
+  /* Game chrome */
+  --bw: 3px;
+  --r-chip: 999px;
+  --r-card: 20px;
+  --r-panel: 28px;
+  --sh-card: 8px 8px 0 var(--cobalt-500);
+  --ease-pop: cubic-bezier(.34, 1.56, .64, 1);
 }
-html, body { margin: 0; height: 100%; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--surface-page);
+  color: var(--text-body);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}

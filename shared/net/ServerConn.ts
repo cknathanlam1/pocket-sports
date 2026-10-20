@@ -70,6 +70,14 @@ export class ServerConn {
     return () => this.openHandlers.delete(h);
   }
 
+  /** Skip the backoff and reconnect immediately ("Rejoin now"). */
+  reconnectNow(): void {
+    if (this.connected) return;
+    this.retryMs = 500;
+    this.ws?.close();
+    if (!this.ws) this.connect();
+  }
+
   close(): void {
     this.closed = true;
     clearInterval(this.echoTimer);

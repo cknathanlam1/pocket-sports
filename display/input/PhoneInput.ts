@@ -7,6 +7,7 @@ import { Emitter, type PaddleInput, type Swing } from './PaddleInput.ts';
 export class PhoneInput implements PaddleInput {
   private swings = new Emitter<Swing>();
   private taps = new Emitter<number>();
+  private pauses = new Emitter<void>();
   private q: Quat | null = null;
   private q0: Quat | null = null;
   /** laptop clock − phone clock (ms); null until the first sync round. */
@@ -14,6 +15,11 @@ export class PhoneInput implements PaddleInput {
   rtt: number | null = null;
   /** Laptop time the last orientation sample arrived. */
   lastOrientAt = -Infinity;
+
+  /** Latest raw device orientation (device → earth), before calibration. */
+  get raw(): Quat | null {
+    return this.q;
+  }
 
   get calibrated(): boolean {
     return this.q0 !== null;
@@ -45,6 +51,9 @@ export class PhoneInput implements PaddleInput {
       case 's':
         this.swings.emit({ t: this.toLocal(m.t), peak: m.peak, face: m.face, path: m.path, roll: m.roll });
         break;
+      case 'pz':
+        this.pauses.emit();
+        break;
       case 'sync':
         this.offset = m.off;
         this.rtt = m.rtt;
@@ -62,6 +71,11 @@ export class PhoneInput implements PaddleInput {
 
   onTap(cb: (t: number) => void): () => void {
     return this.taps.on(cb);
+  }
+
+  /** Pause button on the phone. */
+  onPause(cb: () => void): () => void {
+    return this.pauses.on(cb);
   }
 
   dispose(): void {}

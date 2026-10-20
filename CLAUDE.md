@@ -13,8 +13,12 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `npm run build && npm start`: production. One Node process serves `dist/` + `/ws` on `$PORT` (default 8787)
 
 ## Architecture
-- `/design`: Claude Design export, read-only. **Visuals: /design wins. Behavior: the spec wins.**
-- `/shared`: protocol types (`protocol.ts`), constants, `styles/tokens.css` (design tokens), server link
+- `/design`: Claude Design reference, read-only: `tokens/` (design-system CSS, verbatim) and `SPEC.md` (a digest of every screen, game token, hit tier, motion/sound rule and the 3D asset list). **Visuals: /design wins. Behavior: the spec wins.**
+  The raw `.dc.html` lives in Claude Design (link in `design/README.md`). Reading it from here needs `/design-login`, or Claude in Chrome with your claude.ai session.
+- `/shared`: protocol types (`protocol.ts`), constants, net (`ServerConn`, `PeerLink`), `quat.ts`, `clock.ts`.
+  `styles/`: `tokens.css` (DS tokens in `ds/` + game tokens like `--p1`/`--p2`/`--ball`/`--table`), `fonts.css`, and `game.css` (chunky buttons, chips, keyframes).
+  Fonts: Poppins + Caveat from Google Fonts, Open Sauce One from Fontsource on jsDelivr (pinned 5.3.0).
+  `art/`: React ports of the design components (`Char` with poses and looks, `Paddle`, `HandPhone`, `Wordmark`/`BigLogo`/`Sunburst`/`StampWord`).
 - `/engine`: pure TS (rules, physics, shot model, CPU). **No DOM/Three.js imports** so it is testable and can run server-side.
   All tuning values are in `engine/config.ts` (the dev panel exposes them).
 - `/display`: laptop app at `/` (`index.html` → `display/main.tsx`). Three.js scene with an explicit rAF loop; React only for menus/overlays.
@@ -38,7 +42,12 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `runtime.ts` owns renderer, `World` (scene/World.ts: primitives venue, table, avatars, paddle, ball, blob shadow, trail, camera), input, and the current `Game`.
   The menu shows a CPU-vs-CPU attract match. In dev, `window.pocket` exposes the runtime for scripted playtests.
 - `input/PaddleInput.ts` is the swappable input interface. `MouseInput`: mouse Y = face, click / sideways flick = swing (pace from mouse speed), W/S = top/backspin, A/D = sidespin, Space = toss.
-- `store.ts` + `ui/App.tsx`: React overlays (menu, scoreboard, banners, timing readout, pause, match over).
+- `store.ts` + `ui/`: React screens on a 1440×900 stage scaled to the window (`ui/Stage.tsx`), named after the design ids:
+  title 7a → pairing 2a/2b → calibrate 2c (live tilt/roll mirror) → menu 2g (+ settings) → setup 2i → match HUD 2j–2o (score cards, rally pill, phone pill, banners, coach hint,
+  hit tiers 7c/7d, POINT! 7e, match-point glow) → paused 2p / connection lost 2r → results 2q. Customize 2h saves a look to localStorage.
+  Phone taps drive the whole flow: menu → setup → start; pause button toggles pause. Hit tiers: Nice < 35 km/h, Great 35–55, SMASH 55+ or |timing| < 20 ms
+  (hit-stop 40/80 ms, camera shake, flash). In dev, `window.pocketStore` exposes the UI store.
+- Not built yet from the design: tutorial 2d–2f (needs phone swings, M3), practice mode and sound (M4), 3D poses beyond swing (cheer/sad).
 
 ### Pairing + transport (M2)
 - `shared/protocol.ts`: peer messages (`PhoneMsg`/`DisplayMsg`, short keys) and client↔server messages (create/resume/join/sig/relay).
@@ -47,7 +56,7 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `shared/clock.ts`: phone pings, laptop pongs (t0,t1,t2), and the lowest-RTT sample of 10 wins. Rounds run on connect, on transport change, and every 10 s. The phone reports `{sync: off, rtt}` and the laptop converts phone timestamps with `off`.
 - Laptop: `display/net/PhoneHost.ts` owns the room (it survives reloads via sessionStorage + token) and feeds `display/input/PhoneInput.ts` (paddle = q0⁻¹·q).
   `runtime.ts`: a phone tap starts a match / resumes / tosses. Losing the phone mid-match auto-pauses and shows the reconnect QR. `st` UI state and `hit` feedback go to the phone.
-- Phone (`/controller`): `orientation.ts` (W3C alpha/beta/gamma → quaternion, pure), `sensors.ts` (iOS permission from the tap, orientation stream, wake lock, portrait lock, vibrate), `session.ts` (join, link, clock sync, 60 Hz `o` stream, calibration), `main.tsx` (screens).
+- Phone (`/controller`): `orientation.ts` (W3C alpha/beta/gamma → quaternion, pure), `sensors.ts` (iOS permission from the tap, orientation stream, wake lock, portrait lock, vibrate), `session.ts` (join, link, clock sync, 60 Hz `o` stream, calibration), `main.tsx` (screens 3a–3l, plus the 7f SMASH flood with tier-based vibration).
   Calibration pose: phone upright, screen toward the player. In that pose the device axes equal the paddle axes, so q0⁻¹·q drives the on-screen paddle directly. Motion is judged by events arriving, not by the permission answer.
 
 Routing: `/p/:room` → `controller.html`, via a Vite middleware in dev (`vite.config.ts`) and `server/static.ts` in prod. Both use `CONTROLLER_PATH_RE`.

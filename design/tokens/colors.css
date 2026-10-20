@@ -1,0 +1,32 @@
+:root{
+/* Cobalt — primary. #255DB7 sampled from wordmark + deck panels */
+--cobalt-50:#EDF2FB;--cobalt-100:#D6E2F5;--cobalt-200:#AFC5EA;--cobalt-300:#7FA2DC;--cobalt-400:#4F80CC;--cobalt-500:#255DB7;--cobalt-600:#1F4F9E;--cobalt-700:#1A4285;--cobalt-800:#143468;--cobalt-900:#0E2449;
+--cobalt-vivid:#0661BE;/* illustration crayon blue */
+/* Coral — high-intent accent. #E57A58 deck type; #FD6E45 illustration rug */
+--coral-50:#FDF0EB;--coral-100:#FADCD0;--coral-200:#F5B9A3;--coral-300:#F09A7C;--coral-400:#FD6E45;--coral-500:#E57A58;--coral-600:#D65F3A;--coral-700:#B44A29;
+/* Sun — budget callouts, price tags, hotspots, active */
+--sun-100:#FFF4C7;--sun-200:#FFE98F;--sun-300:#FFDD5C;--sun-400:#FFD23F;--sun-500:#F5C12B;--sun-600:#D9A410;
+/* Blush — secondary panel ground (deck "problem" slide) */
+--blush-100:#FDE7EC;--blush-300:#F6BAC8;--blush-400:#F29FB3;
+/* Lime — rare atmospheric accent (target-market slide blob) */
+--lime-300:#D9EE4A;--lime-500:#5DC265;
+/* Cream neutrals — warm paper, never gray */
+--cream-50:#FFFDF8;--cream-100:#F8F4EC;--cream-200:#F1ECE1;--cream-300:#E6DFD0;--cream-400:#CFC5B0;
+--white:#FFFFFF;
+/* Ink — body text is dark cobalt, not black */
+--ink-900:#10285A;--ink-700:#2A4378;--ink-500:#5A6F99;--ink-300:#9AA8C4;
+
+/* Data viz — budget donut order (from Budget Allocation screen) */
+--viz-1:#255DB7;--viz-2:#F7A48A;--viz-3:#FFC857;--viz-4:#F2603F;--viz-5:#4F86D6;--viz-6:#9DB8E8;--viz-7:#F6BAC8;--viz-8:#F8B98E;
+
+/* Semantic aliases */
+--brand-primary:var(--cobalt-500);--brand-accent:var(--coral-500);--brand-highlight:var(--sun-400);
+--surface-page:var(--cream-100);--surface-card:var(--cream-50);--surface-sunken:var(--cream-200);--surface-inverse:var(--cobalt-500);--surface-blush:var(--blush-300);
+--text-strong:var(--cobalt-500);--text-body:var(--ink-900);--text-muted:var(--ink-500);--text-on-brand:var(--cream-100);--text-on-accent:var(--white);--text-on-sun:var(--ink-900);--text-accent:var(--coral-500);
+--border-subtle:var(--cobalt-100);--border-default:var(--cobalt-200);--border-strong:var(--cobalt-500);
+--action-primary:var(--cobalt-500);--action-primary-hover:var(--cobalt-600);--action-primary-press:var(--cobalt-700);
+--action-cta:var(--coral-500);--action-cta-hover:var(--coral-600);--action-cta-press:var(--coral-700);
+--action-sun:var(--sun-400);--action-sun-hover:var(--sun-500);
+--focus-ring:var(--sun-400);
+--status-fits:#2E8B57;--status-fits-bg:#E3F4E8;--status-tight:var(--sun-600);--status-tight-bg:var(--sun-100);--status-nofit:var(--coral-700);--status-nofit-bg:var(--coral-50);
+}

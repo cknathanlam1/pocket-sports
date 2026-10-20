@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { ClockSync } from '../shared/clock.ts';
 import { PeerLink, type TransportKind } from '../shared/net/PeerLink.ts';
 import { ServerConn } from '../shared/net/ServerConn.ts';
-import type { Quat, UiState } from '../shared/protocol.ts';
+import type { HitTier, Quat, UiState } from '../shared/protocol.ts';
 import { type PermissionResult, keepAwake, requestMotion, tryLockPortrait, vibrate, watchOrientation } from './sensors.ts';
 
 export type Step = 'connecting' | 'not-found' | 'replaced' | 'motion' | 'motion-error' | 'calibrate' | 'play';
@@ -16,7 +16,13 @@ export interface PhoneState {
   rtt: number | null;
   ui: UiState;
   motionError: PermissionResult | 'no-events' | null;
-  flash: { key: number; strength: number } | null;
+  flash: { key: number; strength: number; tier: HitTier; kmh: number; rally: number } | null;
+  /** [you, cpu] points, last point result, next server is you. */
+  score: [number, number] | null;
+  lastPoint: 'won' | 'lost' | 'let' | null;
+  nextYou: boolean;
+  /** Was connected to the laptop at least once (so a drop shows Reconnecting, not Joining). */
+  wasLinked: boolean;
 }
 
 const ORIENT_MIN_INTERVAL_MS = 1000 / 60 - 2;
@@ -44,7 +50,7 @@ export class PhoneSession {
   private stopWatch: (() => void) | null = null;
 
   constructor(room: string) {
-    this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null };
+    this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null, score: null, lastPoint: null, nextYou: false, wasLinked: false };
     const pid = phoneId();
 
     this.conn.onOpen(() => this.conn.send({ k: 'join', code: room, pid }));
@@ -72,7 +78,7 @@ export class PhoneSession {
 
     let wasUp = false;
     this.link.onStatus((s) => {
-      this.set({ transport: s.transport });
+      this.set({ transport: s.transport, ...(s.transport !== 'none' ? { wasLinked: true } : {}) });
       const up = s.transport !== 'none';
       if (up && !wasUp) {
         // (Re)connected: the laptop may have reloaded, so resend calibration and resync clocks.
@@ -87,10 +93,11 @@ export class PhoneSession {
 
     this.link.onMessage((m) => {
       if (m.k === 'pong') this.clock.onPong(m.t0, m.t1, m.t2);
-      else if (m.k === 'st') this.set({ ui: m.s });
+      else if (m.k === 'st') this.set({ ui: m.s, score: m.sc ?? null, lastPoint: m.pt ?? null, nextYou: !!m.nx });
       else if (m.k === 'hit') {
-        vibrate(Math.round(20 + 40 * m.strength));
-        this.set({ flash: { key: ++this.flashKey, strength: m.strength } });
+        const tier = m.tier ?? 'nice';
+        vibrate(tier === 'smash' ? [40, 30, 40] : tier === 'great' ? 25 : 10);
+        this.set({ flash: { key: ++this.flashKey, strength: m.strength, tier, kmh: m.kmh ?? 0, rally: m.rally ?? 0 } });
       }
     });
   }
@@ -138,6 +145,15 @@ export class PhoneSession {
     this.link.send({ k: 'cal', q0: this.q0 });
     vibrate(30);
     this.set({ step: 'play' });
+  }
+
+  /** Pause button: toggles pause / resume on the laptop. */
+  pause(): void {
+    this.link.send({ k: 'pz' });
+  }
+
+  rejoin(): void {
+    this.conn.reconnectNow();
   }
 
   tap(): void {

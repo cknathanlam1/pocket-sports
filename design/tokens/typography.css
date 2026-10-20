@@ -1,0 +1,22 @@
+:root{
+--font-display:"Poppins",ui-sans-serif,system-ui,sans-serif;
+--font-ui:"Open Sauce One","Poppins",ui-sans-serif,system-ui,sans-serif;
+--font-script:"Caveat","Comic Sans MS",cursive;
+--weight-light:300;--weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;--weight-black:800;
+/* Scale (px) */
+--fs-hero:96px;--fs-display:64px;--fs-h1:40px;--fs-h2:28px;--fs-h3:22px;--fs-title:18px;--fs-body:16px;--fs-small:14px;--fs-caption:12px;--fs-micro:11px;
+--lh-tight:1.0;/* @kind font */--lh-snug:1.15;/* @kind font */--lh-normal:1.4;/* @kind font */--lh-relaxed:1.55;/* @kind font */
+--ls-wordmark:-0.045em;--ls-display:-0.03em;--ls-heading:-0.015em;--ls-body:0;/* @kind font */--ls-caps:0.04em;
+/* Semantic roles */
+--type-wordmark:800 var(--fs-display)/var(--lh-tight) var(--font-display);
+--type-display:700 var(--fs-display)/var(--lh-tight) var(--font-display);
+--type-h1:700 var(--fs-h1)/var(--lh-snug) var(--font-display);
+--type-h2:700 var(--fs-h2)/var(--lh-snug) var(--font-display);
+--type-h3:600 var(--fs-h3)/var(--lh-snug) var(--font-ui);
+--type-title:600 var(--fs-title)/var(--lh-snug) var(--font-ui);
+--type-body:400 var(--fs-body)/var(--lh-normal) var(--font-ui);
+--type-small:400 var(--fs-small)/var(--lh-normal) var(--font-ui);
+--type-caption:400 var(--fs-caption)/var(--lh-normal) var(--font-ui);
+--type-price:700 var(--fs-body)/1 var(--font-ui);
+--type-script:500 22px/1.05 var(--font-script);
+}

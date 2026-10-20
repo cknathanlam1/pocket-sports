@@ -1,0 +1,4 @@
+:root{color-scheme:light}
+a{color:var(--cobalt-500);text-decoration-thickness:1.5px;text-underline-offset:2px}
+a:hover{color:var(--coral-500)}
+::selection{background:var(--sun-300);color:var(--ink-900)}

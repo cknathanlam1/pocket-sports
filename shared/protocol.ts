@@ -17,14 +17,20 @@ export type PhoneMsg =
   /** Clock sync request (t0 = phone send time). */
   | { k: 'ping'; t0: number }
   /** Result of a sync round: off = laptopClock − phoneClock (ms), rtt in ms. */
-  | { k: 'sync'; off: number; rtt: number };
+  | { k: 'sync'; off: number; rtt: number }
+  /** Pause button on the phone: toggles pause / resume. */
+  | { k: 'pz' };
 
 export type UiState = 'serve' | 'rally' | 'between' | 'paused' | 'lobby';
 
+export type HitTier = 'nice' | 'great' | 'smash';
+
 /** Laptop → phone */
 export type DisplayMsg =
-  | { k: 'st'; s: UiState }
-  | { k: 'hit'; strength: number }
+  /** UI state. sc = [you, cpu] points; pt = how the last point went; nx = next server is you. */
+  | { k: 'st'; s: UiState; sc?: [number, number]; pt?: 'won' | 'lost' | 'let'; nx?: boolean }
+  /** Your hit landed: feedback tier, ball speed (km/h) and rally length. */
+  | { k: 'hit'; strength: number; tier?: HitTier; kmh?: number; rally?: number }
   /** t0 echoed; t1 = laptop receive time; t2 = laptop send time. */
   | { k: 'pong'; t0: number; t1: number; t2: number };
 

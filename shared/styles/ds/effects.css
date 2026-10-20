@@ -1,0 +1,20 @@
+:root{
+/* Radii — soft but not bubbly; phone chrome is the only big radius */
+--radius-xs:4px;--radius-sm:6px;--radius-md:10px;--radius-lg:14px;--radius-xl:20px;--radius-sheet:24px;--radius-device:44px;--radius-pill:999px;
+/* Borders — line-art UI frames */
+--border-hair:1px;--border-line:1.5px;--border-frame:2px;--border-heavy:3px;
+/* Shadows — flat, warm, sparing. Offset "sticker" shadow is the brand signature */
+--shadow-none:none;
+--shadow-sm:0 1px 2px rgba(16,40,90,.08);
+--shadow-md:0 4px 14px rgba(16,40,90,.10);
+--shadow-lg:0 12px 32px rgba(16,40,90,.16);
+--shadow-sheet:0 -8px 28px rgba(16,40,90,.14);
+--shadow-sticker:3px 3px 0 var(--cobalt-500);
+--shadow-sticker-coral:3px 3px 0 var(--coral-500);
+/* Motion — snappy + a little bounce */
+--ease-out:cubic-bezier(.2,.8,.2,1);/* @kind other */--ease-bounce:cubic-bezier(.34,1.56,.64,1);/* @kind other */--ease-in-out:cubic-bezier(.65,0,.35,1);/* @kind other */
+--dur-fast:120ms;/* @kind other */--dur-base:200ms;/* @kind other */--dur-slow:340ms;/* @kind other */--dur-sheet:420ms;/* @kind other */
+--press-scale:.96;/* @kind other */
+/* Overlays */
+--scrim:rgba(14,36,73,.42);
+}

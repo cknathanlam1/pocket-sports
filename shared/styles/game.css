@@ -1,0 +1,58 @@
+/* Shared Pocket Sports UI primitives (laptop + phone): chunky ink-outlined buttons, chips, cards,
+   stamps and the keyframes from the design's expressive pass. */
+@keyframes ps-spin { to { transform: rotate(360deg); } }
+@keyframes ps-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes ps-bob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-18px) rotate(3deg); } }
+@keyframes ps-pop { 0%, 100% { transform: scale(1) rotate(-4deg); } 50% { transform: scale(1.06) rotate(-2deg); } }
+@keyframes ps-stamp-in { 0% { transform: scale(3) rotate(-16deg); opacity: 0; } 30% { transform: scale(.9) rotate(-7deg); opacity: 1; } 45% { transform: scale(1.06) rotate(-7deg); } 60%, 80% { transform: scale(1) rotate(-7deg); opacity: 1; } 100% { transform: translateY(-40px) rotate(-7deg); opacity: 0; } }
+@keyframes ps-banner-in { 0% { transform: translateX(-50%) scale(.6); opacity: 0; } 60% { transform: translateX(-50%) scale(1.06); opacity: 1; } 100% { transform: translateX(-50%) scale(1); opacity: 1; } }
+@keyframes ps-slide-in { 0% { transform: translate(-50%, -24px); opacity: 0; } 100% { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes ps-flash { 0% { opacity: .85; } 100% { opacity: 0; } }
+@keyframes ps-ring { 0% { transform: scale(.2); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes ps-burst { 0% { transform: scale(0) rotate(0); opacity: 0; } 15% { transform: scale(1.15) rotate(10deg); opacity: 1; } 100% { transform: scale(1.6) rotate(20deg); opacity: 0; } }
+@keyframes ps-score-in { 0% { transform: translateY(24px); opacity: 0; } 70% { transform: translateY(-4px); opacity: 1; } 100% { transform: translateY(0); } }
+@keyframes ps-chip { 0% { transform: translateY(8px) scale(.6); opacity: 0; } 20% { transform: translateY(0) scale(1.1); opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(-10px); opacity: 0; } }
+@keyframes ps-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ps-panel-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.btn {
+  font: 800 28px/1 var(--font-display);
+  letter-spacing: -0.02em;
+  min-height: 72px;
+  padding: 0 40px;
+  border-radius: 18px;
+  border: var(--bw) solid var(--ink);
+  background: var(--cream-50);
+  color: var(--ink);
+  box-shadow: 0 5px 0 var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast);
+}
+.btn:hover { background: var(--cobalt-50); }
+.btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink); }
+.btn:focus-visible { outline: none; box-shadow: 0 5px 0 var(--ink), 0 0 0 5px var(--sun-400); }
+.btn.primary { background: var(--coral-500); color: #fff; box-shadow: 0 5px 0 var(--coral-700); }
+.btn.primary:hover { background: var(--coral-600); }
+.btn.primary:active { background: var(--coral-600); box-shadow: 0 1px 0 var(--coral-700); }
+.btn.primary:focus-visible { box-shadow: 0 5px 0 var(--coral-700), 0 0 0 5px var(--sun-400); }
+.btn:disabled { background: var(--cream-300); color: var(--ink-500); border-color: var(--cream-400); box-shadow: none; cursor: default; transform: none; }
+.btn.small { font-size: 20px; min-height: 56px; padding: 0 24px; border-radius: 16px; }
+
+.chip { display: inline-flex; align-items: center; gap: 10px; background: var(--cream-50); border: 2px solid var(--ink); border-radius: var(--r-chip); padding: 6px 16px; font: 600 16px var(--font-ui); color: var(--ink); }
+.caption-caps { font: 800 13px var(--font-display); letter-spacing: .14em; }
+.script { font-family: var(--font-script); font-weight: 600; }
+
+.conn-shape { width: 14px; height: 14px; display: inline-block; flex: none; }
+.conn-shape.good { background: var(--win); border-radius: 50%; }
+.conn-shape.weak { background: var(--sun-500); border-radius: 3px; }
+.conn-shape.lost { background: var(--lose); border-radius: 0; }
+
+.code-tiles { display: flex; gap: 12px; }
+.code-tile { width: 84px; height: 96px; border-radius: 16px; background: var(--sun-400); border: var(--bw) solid var(--ink); box-shadow: 0 5px 0 var(--ink); display: grid; place-items: center; font: 800 60px var(--font-display); color: var(--ink); }
+.code-tiles.small .code-tile { width: 60px; height: 70px; border-radius: 12px; font-size: 40px; box-shadow: 0 4px 0 var(--ink); }
+
+.qr-frame { padding: 20px; background: #fff; border: var(--bw) solid var(--ink); border-radius: 20px; line-height: 0; }

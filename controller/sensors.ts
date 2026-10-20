@@ -91,7 +91,7 @@ export async function tryLockPortrait(): Promise<void> {
   }
 }
 
-export function vibrate(ms: number): void {
+export function vibrate(ms: number | number[]): void {
   try {
     navigator.vibrate?.(ms);
   } catch {

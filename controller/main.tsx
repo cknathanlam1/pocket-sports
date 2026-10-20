@@ -1,20 +1,17 @@
+// Phone controller UI (design 3a–3l and 7f). Portrait, full-width tap targets, screen kept awake.
 import { createRoot } from 'react-dom/client';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import '../shared/styles/tokens.css';
+import '../shared/styles/game.css';
 import './controller.css';
+import { HandPhone } from '../shared/art/HandPhone.tsx';
+import { StampWord, Sunburst, Wordmark } from '../shared/art/Logo.tsx';
+import { Paddle } from '../shared/art/Paddle.tsx';
 import { type PhoneSession as Session, PhoneSession, usePhone } from './session.ts';
 import { platform } from './sensors.ts';
 
 const room = (location.pathname.split('/')[2] ?? '').toUpperCase();
 const session = new PhoneSession(room);
-
-const HINT: Record<string, string> = {
-  lobby: 'Tap to start the match',
-  serve: 'Your serve: tap to toss, then swing',
-  rally: 'Swing!',
-  between: 'Get ready…',
-  paused: 'Paused: tap to resume',
-};
 
 function useLandscape(): boolean {
   const q = '(orientation: landscape)';
@@ -28,137 +25,153 @@ function useLandscape(): boolean {
   return l;
 }
 
-function Status({ s }: { s: Session }) {
+/** Visible for `ms` after each change of `key`. */
+function useBlink(key: number | undefined, ms: number): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (key === undefined) return;
+    setOn(true);
+    const id = setTimeout(() => setOn(false), ms);
+    return () => clearTimeout(id);
+  }, [key]);
+  return on;
+}
+
+function StatusPill({ s }: { s: Session }) {
   const st = usePhone(s);
-  const label = st.transport === 'p2p' ? 'P2P' : st.transport === 'relay' ? 'Relay' : st.displayUp ? 'Linking…' : 'Laptop offline';
+  const level = st.transport === 'none' ? 'lost' : (st.rtt ?? 0) > 120 ? 'weak' : 'good';
+  const word = st.transport === 'none' ? (st.displayUp ? 'Linking' : 'Lost') : level === 'weak' ? 'Weak' : 'OK';
   return (
-    <div className="status">
-      <span className={`dot ${st.transport}`} />
-      <span>{st.room}</span>
-      <span className="muted">
-        {label}
-        {st.transport !== 'none' && st.rtt !== null ? ` · ${st.rtt} ms` : ''}
-      </span>
+    <div className="status-pill" title={st.transport === 'p2p' ? 'Peer-to-peer' : st.transport === 'relay' ? 'Relay via server' : 'Not connected'}>
+      <span className={`conn-shape ${level}`} />
+      {word}
+      {st.transport !== 'none' && st.rtt !== null && <span className="dim"> · {st.rtt} ms</span>}
+    </div>
+  );
+}
+
+/** Cream message screen: big icon disc, title, body, optional steps, one full-width button. */
+function Message({ icon, iconBg, title, body, steps, button, onButton, primary = true, children }: { icon: string; iconBg: string; title: string; body: string; steps?: string; button?: string; onButton?: () => void; primary?: boolean; children?: ReactNode }) {
+  return (
+    <div className="screen cream msg">
+      <div className="icon-disc" style={{ background: iconBg }}>
+        {icon}
+      </div>
+      <div className="p-title">{title}</div>
+      <div className="p-body">{body}</div>
+      {steps && <div className="steps">{steps}</div>}
+      {children}
+      {button && (
+        <button className={`p-btn ${primary ? 'primary' : ''}`} onClick={onButton}>
+          {button}
+        </button>
+      )}
     </div>
   );
 }
 
 function MotionError({ s }: { s: Session }) {
   const st = usePhone(s);
-  const msg =
-    st.motionError === 'insecure'
-      ? 'Motion sensors need a secure (https) page. Open the link from the laptop’s QR code.'
-      : st.motionError === 'unsupported' || st.motionError === 'no-events'
-        ? 'This browser isn’t sending motion data. Use Safari on iPhone or Chrome on Android.'
-        : platform === 'ios'
-          ? 'Motion access was denied. Close this tab, reopen the link, and tap Allow. (If no prompt appears: Settings → Safari → Motion & Orientation Access.)'
-          : 'Motion access was denied. Allow motion sensors for this site in your browser settings, then try again.';
+  const [copied, setCopied] = useState(false);
+  if (st.motionError === 'unsupported' || st.motionError === 'no-events' || st.motionError === 'insecure') {
+    return (
+      <Message
+        icon="?"
+        iconBg="var(--sun-200)"
+        title="Try a different browser"
+        body={st.motionError === 'insecure' ? 'Motion needs a secure (https) link. Scan the QR code on the laptop again.' : 'This browser can’t read motion. Open this link in Safari (iPhone) or Chrome (Android).'}
+        button={copied ? 'Link copied ✓' : 'Copy link'}
+        primary={false}
+        onButton={() => void navigator.clipboard?.writeText(location.href).then(() => setCopied(true), () => {})}
+      />
+    );
+  }
   return (
-    <div className="center">
-      <h1>Motion unavailable</h1>
-      <p>{msg}</p>
-      <button className="primary" onClick={() => void s.enableMotion()}>Try again</button>
-    </div>
+    <Message
+      icon="✕"
+      iconBg="var(--blush-300)"
+      title="Motion is blocked"
+      body="Your phone can’t feel the swing yet. Turn it on:"
+      steps={
+        platform === 'ios'
+          ? '1. Settings › Safari › Motion & Orientation Access\n2. Switch it on\n3. Come back and tap Try again'
+          : '1. Tap the lock icon next to the address\n2. Site settings › Motion sensors › Allow\n3. Come back and tap Try again'
+      }
+      button="Try again"
+      onButton={() => void s.enableMotion()}
+    />
   );
 }
 
+/** Paddle mode (3d idle · 3e serve · 3f hit flash · 3g between points · 7f SMASH). */
 function Play({ s }: { s: Session }) {
   const st = usePhone(s);
   const lastTap = useRef(0);
-  const [flash, setFlash] = useState(false);
-  useEffect(() => {
-    if (!st.flash) return;
-    setFlash(true);
-    const id = setTimeout(() => setFlash(false), 140);
-    return () => clearTimeout(id);
-  }, [st.flash?.key]);
+  const hit = useBlink(st.flash?.key, st.flash?.tier === 'smash' ? 600 : 160);
+  const smash = hit && st.flash?.tier === 'smash';
 
   const onDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('.pause-btn')) return;
     e.preventDefault();
     const now = performance.now();
     s.tap();
     if (now - lastTap.current < 300) s.calibrate(); // double-tap anywhere = recalibrate
     lastTap.current = now;
   };
-  return (
-    <div className="pad" onPointerDown={onDown}>
-      <Status s={s} />
-      <div className={`paddle ${flash ? 'pulse' : ''}`} />
-      <div className="hint">{st.displayUp ? HINT[st.ui] : 'Waiting for the laptop…'}</div>
-      <div className="sub muted">Double-tap anywhere to recalibrate</div>
-      {flash && <div className="flash" style={{ opacity: 0.35 + 0.5 * (st.flash?.strength ?? 0.5) }} />}
-    </div>
-  );
-}
 
-function App() {
-  const st = usePhone(session);
-  const landscape = useLandscape();
-  let body: React.ReactNode;
-  switch (st.step) {
-    case 'connecting':
-      body = (
-        <div className="center">
-          <h1>Connecting…</h1>
-          <p className="muted">Room {room}</p>
-        </div>
-      );
-      break;
-    case 'not-found':
-      body = (
-        <div className="center">
-          <h1>Room {room} not found</h1>
-          <p>Check the code on the laptop screen, or scan its QR code again. Rooms expire after 10 minutes idle.</p>
-          <RoomInput />
-        </div>
-      );
-      break;
-    case 'replaced':
-      body = (
-        <div className="center">
-          <h1>Paddle opened elsewhere</h1>
-          <p>Another phone or tab joined room {room}. Reload to take over again.</p>
-          <button className="primary" onClick={() => location.reload()}>Reload</button>
-        </div>
-      );
-      break;
-    case 'motion':
-      body = (
-        <div className="center">
-          <Status s={session} />
-          <h1>Your phone is the paddle</h1>
-          <p>Hold it upright like a paddle, with the screen facing you.</p>
-          <button className="primary big" onClick={() => void session.enableMotion()}>Enable motion</button>
-        </div>
-      );
-      break;
-    case 'motion-error':
-      body = <MotionError s={session} />;
-      break;
-    case 'calibrate':
-      body = (
-        <div className="center">
-          <Status s={session} />
-          <h1>Calibrate</h1>
-          <p>Point the phone at the laptop like a paddle (screen facing you, top edge up), then tap Calibrate.</p>
-          <button className="primary big" onClick={() => session.calibrate()}>Calibrate</button>
-        </div>
-      );
-      break;
-    case 'play':
-      body = <Play s={session} />;
-      break;
+  if (st.ui === 'paused') return <Message icon="II" iconBg="var(--sun-200)" title="Game paused" body="Your match is waiting on the laptop." button="Resume" onButton={() => s.pause()} />;
+  if (st.wasLinked && st.transport === 'none') {
+    return <Message icon="↻" iconBg="var(--cobalt-100)" title="Reconnecting…" body="Hang on — we’re finding your laptop. The game is paused." button="Rejoin now" primary={false} onButton={() => s.rejoin()} />;
   }
+
+  const mode = smash ? 'smash' : st.ui === 'serve' ? 'serve' : st.ui === 'between' ? 'between' : hit ? 'flash' : 'idle';
+  const bg = { idle: 'var(--phone-bg)', serve: 'var(--sun-400)', between: 'var(--phone-bg)', flash: 'var(--cobalt-50)', smash: 'var(--p1)' }[mode];
+  let hint = 'Double-tap to recalibrate';
+  if (mode === 'serve') hint = 'Your serve';
+  if (mode === 'between') hint = `Next serve: ${st.nextYou ? 'you' : 'Marlo'}`;
+  if (st.ui === 'lobby') hint = st.displayUp ? 'Tap to play · double-tap to recalibrate' : 'Waiting for the laptop…';
+  if (mode === 'flash') hint = '';
+
   return (
-    <>
-      {body}
-      {landscape && (
-        <div className="rotate">
-          <div className="rotate-icon">⟳</div>
-          <p>Rotate your phone to portrait</p>
+    <div className={`screen pad ${mode}`} style={{ background: bg }} onPointerDown={onDown}>
+      {mode === 'smash' && (
+        <div className="phone-burst">
+          <Sunburst size={1100} a="#2F6FDB" b="#4A86E8" seconds={1.2} />
         </div>
       )}
-    </>
+      <button className="pause-btn" aria-label="Pause" onClick={() => s.pause()}>
+        <span />
+        <span />
+      </button>
+      <div className="pad-status">
+        <StatusPill s={s} />
+      </div>
+      {mode === 'flash' && (
+        <>
+          <div className="ring r1" />
+          <div className="ring r2" />
+        </>
+      )}
+      {mode === 'serve' && <div className="pad-big">TAP TO TOSS</div>}
+      {mode === 'between' && st.score && <div className="pad-big cream">{`${st.score[0]} – ${st.score[1]}`}</div>}
+      <div className={`pad-paddle ${mode}`}>
+        <Paddle size={mode === 'serve' ? 190 : mode === 'between' ? 170 : 260} glow={mode === 'idle' || mode === 'flash' || mode === 'smash'} />
+      </div>
+      {mode === 'serve' && <div className="pad-sub">then swing!</div>}
+      {mode === 'between' && st.lastPoint === 'won' && <div className="pad-sub lime">✓ Point!</div>}
+      {mode === 'between' && st.lastPoint === 'lost' && <div className="pad-sub blush">✕ Missed it</div>}
+      {mode === 'between' && st.lastPoint === 'let' && <div className="pad-sub cream">Let · replay</div>}
+      {mode === 'smash' && (
+        <div className="smash-col">
+          <StampWord text="SMASH!" size={64} fill="#FFD23F" stroke={10} />
+          <div className="chip">
+            {st.flash?.kmh ?? 0} km/h · rally {st.flash?.rally ?? 0}
+          </div>
+        </div>
+      )}
+      {hint && <div className={`pad-hint ${mode === 'serve' ? 'ink' : ''}`}>{hint}</div>}
+      {mode === 'flash' && <div className="white-flash" />}
+    </div>
   );
 }
 
@@ -172,9 +185,98 @@ function RoomInput() {
         if (code.length === 4) location.href = `/p/${code}`;
       }}
     >
-      <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))} placeholder="ABCD" inputMode="text" autoCapitalize="characters" aria-label="Room code" />
-      <button className="primary" disabled={code.length !== 4}>Join</button>
+      <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))} placeholder="ABCD" autoCapitalize="characters" aria-label="Room code" />
+      <button className="p-btn small primary" disabled={code.length !== 4}>
+        Join
+      </button>
     </form>
+  );
+}
+
+function App() {
+  const st = usePhone(session);
+  const landscape = useLandscape();
+  let body: ReactNode;
+  switch (st.step) {
+    case 'connecting':
+      body = (
+        <div className="screen cream join">
+          <Wordmark size={34} />
+          <div className="ball-disc">●</div>
+          <div className="p-title ink">
+            Joining room
+            <br />
+            <span className="code">{room}</span>
+          </div>
+          <div className="progress">
+            <div />
+          </div>
+          <div className="p-body">Finding your laptop…</div>
+        </div>
+      );
+      break;
+    case 'not-found':
+      body = (
+        <Message icon="⌕" iconBg="var(--blush-300)" title="Room not found" body="That code isn’t active. Check the 4 letters on your laptop, or scan the QR code again.">
+          <RoomInput />
+        </Message>
+      );
+      break;
+    case 'replaced':
+      body = <Message icon="↻" iconBg="var(--cobalt-100)" title="Paddle opened elsewhere" body={`Another phone or tab joined room ${room}. Reload to take it back.`} button="Reload" onButton={() => location.reload()} />;
+      break;
+    case 'motion':
+      body = (
+        <div className="screen cream perm">
+          <div className="hand-disc">
+            <HandPhone mode="tilt" rot={-10} size={230} />
+          </div>
+          <div className="p-title">Turn your phone into a paddle</div>
+          <div className="p-body">We read tilt and swing only. Nothing is recorded.</div>
+          <button className="p-btn primary" onClick={() => void session.enableMotion()}>
+            Allow motion
+          </button>
+        </div>
+      );
+      break;
+    case 'motion-error':
+      body = <MotionError s={session} />;
+      break;
+    case 'calibrate':
+      body = (
+        <div className="screen cream calib">
+          <div className="calib-top">
+            <StatusPill s={session} />
+          </div>
+          <div className="p-title" style={{ fontSize: 40 }}>
+            Point at the laptop
+          </div>
+          <div className="p-body">Hold it like a paddle, then tap.</div>
+          <div className="hand-disc big">
+            <HandPhone mode="hold" size={250} />
+          </div>
+          <button className="p-btn primary huge" onClick={() => session.calibrate()}>
+            Calibrate
+          </button>
+          <div className="script note">double-tap anytime to recalibrate</div>
+        </div>
+      );
+      break;
+    case 'play':
+      body = <Play s={session} />;
+      break;
+  }
+  return (
+    <>
+      {body}
+      {landscape && (
+        <div className="rotate">
+          <div className="rotate-icon">⟳</div>
+          <div className="p-title">Rotate to portrait</div>
+          <div className="p-body">Hold your phone upright, like a paddle.</div>
+        </div>
+      )}
+    </>
   );
 }
 
