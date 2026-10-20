@@ -2,9 +2,10 @@
 
 Browser game: the laptop renders a 3D table tennis match (Three.js); a phone joins by QR
 code (no install) and becomes a motion-controlled paddle. Built milestone by milestone
-(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M0 done**.
+(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M1 done** (playable vs CPU with the mouse).
 
 ## Commands
+- Windows PowerShell blocks `npm.ps1`: use `npm.cmd ...` there (or Git Bash / cmd).
 - `npm run dev`: ws server (:8787, `node --watch`) + Vite (:5173, proxies `/ws`). Open http://localhost:5173
 - `npm run tunnel`: public HTTPS URL for phone testing (needs `cloudflared`, see below)
 - `npm test` / `npm run test:watch`: Vitest (`tests/**/*.test.ts`)
@@ -20,6 +21,24 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `/controller`: phone app at `/p/:room` (`controller.html` → `controller/main.tsx`)
 - `/server`: Node `http` + `ws`. Rooms, signaling, relay (M2). In dev it only does ws, and Vite serves pages.
 - `/tests`: Vitest
+
+### Engine (`/engine`)
+- `config.ts`: every tuning value (physics, shot model, assist, CPU table, serve, movement). `Game` reads it live, so the dev panel (M3) can mutate it.
+- `physics.ts`: ball step at 240 Hz in *sim* time (RK2), gravity + drag + Magnus, swept collision vs table/net/floor, spin-coupled table bounce (Coulomb friction, hollow-sphere inertia).
+  Deviation from the spec: Magnus lift saturates above spin ratio r|ω|/|v| = `magnusMaxSpinRatio` (0.5). The spec's linear formula lets heavy backspin out-lift gravity, so some shots couldn't land.
+- `solver.ts`: simulate-and-correct launch solver (2×2 Broyden on the aim point). It searches outward from the intended pace when no trajectory at that pace lands and clears the net. `solveServe` targets the 2nd bounce.
+- `shot.ts`: swing features → intent (timing → lateral, face → depth/arc, peak → pace, path → top/back, roll → side) → `resolveShot` (scatter, assist pull-back, injected borderline errors).
+- `rules.ts` (score/serve rotation/deuce/match), `referee.ts` (lets, faults, point reasons from ball events), `cpu.ts` (shot choice per level).
+- `game.ts`: orchestrator. `update(realDt)` accumulates realDt × `gameSpeed` into fixed steps. `swing(side, ageRealSec, features)` is lag-compensated:
+  it looks up the ball at the swing moment in a ring buffer, judges timing against the predicted ideal contact (apex after the bounce, or 0.3 m past the end line),
+  then re-simulates the struck ball forward to now. Players auto-move to the predicted contact (CPU after its reaction delay).
+- Coordinates: x lateral (+x = near player's right), y up, z along the table (+z = near/human end), net at z = 0. Side 0 = near, side 1 = far.
+
+### Display (`/display`)
+- `runtime.ts` owns renderer, `World` (scene/World.ts: primitives venue, table, avatars, paddle, ball, blob shadow, trail, camera), input, and the current `Game`.
+  The menu shows a CPU-vs-CPU attract match. In dev, `window.pocket` exposes the runtime for scripted playtests.
+- `input/PaddleInput.ts` is the swappable input interface. `MouseInput`: mouse Y = face, click / sideways flick = swing (pace from mouse speed), W/S = top/backspin, A/D = sidespin, Space = toss.
+- `store.ts` + `ui/App.tsx`: React overlays (menu, scoreboard, banners, timing readout, pause, match over).
 
 Routing: `/p/:room` → `controller.html`, via a Vite middleware in dev (`vite.config.ts`) and `server/static.ts` in prod. Both use `CONTROLLER_PATH_RE`.
 
@@ -46,6 +65,7 @@ iOS only exposes motion sensors in a secure context, so plain `http://<lan-ip>:5
 The `/p/XXXX` page doubles as a connectivity check: secure context, motion API, and server RTT.
 
 ## Status / known gaps
+- Audio, dev panel, practice mode, phone input: later milestones (M2–M4).
 - /design not imported yet (Claude Design needs `/design-login` from an interactive Claude Code session).
   `shared/styles/tokens.css` holds placeholder values until then.
 - The repo lives in OneDrive. Consider excluding `node_modules` from sync.
