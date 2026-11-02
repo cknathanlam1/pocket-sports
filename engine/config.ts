@@ -87,6 +87,12 @@ export const defaultConfig = {
   },
   render: {
     trailMinSpeed: 12, // m/s
+    // Adaptive resolution (display only): start at min(devicePixelRatio, maxPixelRatio); if frames average
+    // over slowFrameMs for ~2 s, step the pixel ratio down by 0.25 (never below minPixelRatio). One-way per session:
+    // the frame interval can't show headroom at the display's refresh cap, so stepping back up would oscillate.
+    maxPixelRatio: 2,
+    minPixelRatio: 1,
+    slowFrameMs: 19,
   },
 };
 

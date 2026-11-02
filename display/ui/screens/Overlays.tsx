@@ -141,6 +141,37 @@ export function Results({ rt }: { rt: Runtime }) {
   );
 }
 
+/** Shown when the WebSocket to our server has been down for a few seconds. The game keeps running (CPU, mouse). */
+export function ServerBanner({ rt }: { rt: Runtime }) {
+  const { phone } = useUi();
+  const [down, setDown] = useState(false);
+  const [everUp, setEverUp] = useState(false);
+  useEffect(() => {
+    if (phone.serverUp) {
+      setEverUp(true);
+      setDown(false);
+      return;
+    }
+    const id = setTimeout(() => setDown(true), 4000);
+    return () => clearTimeout(id);
+  }, [phone.serverUp]);
+  if (!down) return null;
+  return (
+    <Stage>
+      <div className="server-banner panel-in" role="alert" data-ui>
+        <span className="conn-shape lost" style={{ borderRadius: '50%' }} />
+        <div>
+          <div className="row-title">{everUp ? 'Lost the game server' : 'Can’t reach the game server'}</div>
+          <div className="row-desc">{everUp ? 'Reconnecting… your phone will rejoin on its own.' : 'Retrying… check your internet connection.'} You can still play with the mouse.</div>
+        </div>
+        <button className="btn small" onClick={() => rt.host.reconnectNow()}>
+          Retry now
+        </button>
+      </div>
+    </Stage>
+  );
+}
+
 export function Toast() {
   const { toast } = useUi();
   const [shown, setShown] = useState(false);

@@ -91,6 +91,26 @@ describe('rooms', () => {
     expect(d2.last('room')?.code).toBe(room.code);
   });
 
+  it('after a server restart the display re-creates its room under the same code', () => {
+    const { room } = setup();
+    const fresh = new Rooms(); // restarted server: no rooms
+    const d = new FakeSock();
+    fresh.connect(d);
+    fresh.message(d, JSON.stringify({ k: 'resume', code: room.code, token: room.token }));
+    expect(d.last('room')?.code).toBe(room.code);
+    const phone = new FakeSock();
+    fresh.connect(phone);
+    fresh.message(phone, JSON.stringify({ k: 'join', code: room.code, pid: 'p' }));
+    expect(phone.last('joined')?.code).toBe(room.code);
+    // A different token can't take the re-created room, and junk codes aren't created.
+    const thief = new FakeSock();
+    fresh.connect(thief);
+    fresh.message(thief, JSON.stringify({ k: 'resume', code: room.code, token: 'x'.repeat(36) }));
+    expect(thief.last('err')?.e).toBe('bad-token');
+    fresh.message(thief, JSON.stringify({ k: 'resume', code: 'zz!', token: 'x'.repeat(36) }));
+    expect(thief.last('err')?.e).toBe('room-not-found');
+  });
+
   it('rooms expire after 10 minutes idle, not while active', () => {
     const { rooms, display, room, tick } = setup();
     tick(ROOM_IDLE_EXPIRY_MS - 1000);

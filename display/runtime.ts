@@ -56,10 +56,17 @@ export class Runtime {
   private weakWarned = false;
   /** Tutorial screen listens to swings instead of the game. */
   private swingTap: ((s: Swing) => void) | null = null;
+  /** Adaptive resolution: current pixel ratio and a frame-time window. */
+  private pixelRatio = 1;
+  private perfFrames = 0;
+  private perfMs = 0;
+  /** Screens with an opaque backdrop: the 3D scene is hidden, so skip rendering it. */
+  private static readonly OPAQUE = new Set(['setup', 'customize', 'calibrate', 'tutorial']);
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.pixelRatio = Math.min(devicePixelRatio, this.cfg.render.maxPixelRatio);
+    this.renderer.setPixelRatio(this.pixelRatio);
     const resize = () => {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
@@ -132,6 +139,8 @@ export class Runtime {
       }, 1400);
     }
     if (s.phone === 'calibrated' && (screen === 'pairing' || screen === 'calibrate' || screen === 'title')) this.go(store.get().tutorialDone ? 'menu' : 'tutorial');
+    // Our room expired (or another tab took it) and a fresh code replaced it: the phone must rescan.
+    if (prev.code && s.code && prev.code !== s.code) store.toast(`Room expired: new code ${s.code}. Rescan on your phone.`, '!', 'warn');
     if (prev.transport === 'none' && s.transport !== 'none') sfx.connect();
     if (prev.transport !== 'none' && s.transport === 'none') sfx.disconnect();
     if (store.get().usingPhone && s.rtt !== null && s.rtt > 150 && !this.weakWarned) {
@@ -291,12 +300,34 @@ export class Runtime {
     // The near paddle mirrors the phone whenever one is calibrated (even on the menu, as live feedback).
     const q = this.phoneReady ? this.host.input.orientation() : this.attract ? null : this.mouse.orientation();
     this.world.sync(this.game, q, dt);
-    this.renderer.render(this.world.scene, this.world.camera);
+    if (!Runtime.OPAQUE.has(screen)) {
+      this.renderer.render(this.world.scene, this.world.camera);
+      this.adaptResolution(dt);
+    }
     if (sfx.ready) sfx.startAmbience();
     if (!this.attract) this.publishHud();
     this.publishUiState();
     requestAnimationFrame(this.frame);
   };
+
+  /** Every ~2 s of rendered frames: drop resolution while frames are slow (see render.* in config). */
+  private adaptResolution(dt: number): void {
+    if (dt >= 0.1) return; // a stall (tab switch, GC, alert), not steady-state cost
+    this.perfFrames++;
+    this.perfMs += dt * 1000;
+    if (this.perfMs < 2000) return;
+    const avg = this.perfMs / this.perfFrames;
+    this.perfFrames = 0;
+    this.perfMs = 0;
+    const r = this.cfg.render;
+    if (avg <= r.slowFrameMs) return;
+    const next = Math.max(r.minPixelRatio, this.pixelRatio - 0.25);
+    if (next >= this.pixelRatio) return;
+    this.pixelRatio = next;
+    this.renderer.setPixelRatio(next);
+    const c = this.renderer.domElement;
+    this.renderer.setSize(c.clientWidth, c.clientHeight, false);
+  }
 
   /** Tell the phone what to show (serve / rally / between / paused / lobby) plus score context. */
   private publishUiState(): void {

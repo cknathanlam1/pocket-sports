@@ -75,7 +75,13 @@ export class Rooms {
         return this.send(s, { k: 'room', code: room.code, token: room.token });
       }
       case 'resume': {
-        const room = this.rooms.get(String(msg.code).toUpperCase());
+        const code = String(msg.code).toUpperCase();
+        // After a server restart (redeploy, free-tier spin-down) rooms are gone. Re-create the display's
+        // room under the same code so the phone's rejoin still lands, as long as nobody took the code.
+        if (!this.rooms.has(code) && this.validCode(code) && typeof msg.token === 'string' && msg.token.length >= 16) {
+          this.rooms.set(code, { code, token: msg.token, display: null, phone: null, pid: null, lastActive: this.now() });
+        }
+        const room = this.rooms.get(code);
         if (!room) return this.send(s, { k: 'err', e: 'room-not-found' });
         if (room.token !== msg.token) return this.send(s, { k: 'err', e: 'bad-token' });
         this.leave(s, sess);
@@ -179,6 +185,10 @@ export class Rooms {
       for (let i = 0; i < ROOM_CODE_LENGTH; i++) c += ROOM_ALPHABET[Math.floor(this.random() * ROOM_ALPHABET.length)];
       if (!this.rooms.has(c)) return c;
     }
+  }
+
+  private validCode(c: string): boolean {
+    return c.length === ROOM_CODE_LENGTH && [...c].every((ch) => ROOM_ALPHABET.includes(ch));
   }
 
   private newToken(): string {

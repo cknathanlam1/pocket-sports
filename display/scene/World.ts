@@ -33,6 +33,21 @@ const C = {
 const BALL_VIS_R = BALL_R * 1.6; // drawn larger than real for readability on a laptop
 const GHOSTS = 4;
 
+// Per-frame scratch objects: sync() runs every frame, so it must not allocate (GC hitches show up as dropped frames).
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const _pos = new THREE.Vector3();
+const _want = new THREE.Vector3();
+const _look = new THREE.Vector3();
+const _base = new THREE.Quaternion();
+const _rel = new THREE.Quaternion();
+const _tilt = new THREE.Quaternion();
+const IDLE_TILT = new THREE.Quaternion().setFromAxisAngle(X_AXIS, 0.15);
+const BASE_Q = [new THREE.Quaternion(), new THREE.Quaternion().setFromAxisAngle(Y_AXIS, Math.PI)] as const;
+// FX meshes share geometry; each gets its own material (opacity fades per instance).
+const RING_GEO = new THREE.RingGeometry(0.04, 0.06, 28);
+const SPARK_GEO = [new THREE.CircleGeometry(0.09, 5), new THREE.CircleGeometry(0.16, 5)] as const;
+
 // Three-step toon ramp shared by all materials.
 const ramp = (() => {
   const t = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 210, 210, 210, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat);
@@ -99,7 +114,10 @@ export class World {
   private ball: THREE.Group;
   private shadow: THREE.Mesh;
   private ghosts: THREE.Mesh[] = [];
-  private hist: THREE.Vector3[] = [];
+  /** Ball position history for the ghost trail: a fixed ring of vectors, newest at histHead. */
+  private hist = Array.from({ length: GHOSTS * 2 + 1 }, () => new THREE.Vector3());
+  private histHead = 0;
+  private histCount = 0;
   private avatars: [Avatar, Avatar];
   private camPos = new THREE.Vector3(0, 2.2, HALF_L + 2.6);
   private camLook = new THREE.Vector3(0, TABLE_TOP, -0.5);
@@ -437,7 +455,7 @@ export class World {
 
   /** Expanding ring where the ball hits the table. */
   bounceRing(x: number, z: number): void {
-    const m = new THREE.Mesh(new THREE.RingGeometry(0.04, 0.06, 28), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(RING_GEO, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
     m.rotation.x = -Math.PI / 2;
     m.position.set(x, TABLE_TOP + 0.003, z);
     this.scene.add(m);
@@ -447,7 +465,7 @@ export class World {
 
   /** Star spark at the contact point. */
   spark(x: number, y: number, z: number, big: boolean): void {
-    const m = new THREE.Mesh(new THREE.CircleGeometry(big ? 0.16 : 0.09, 5), new THREE.MeshBasicMaterial({ color: big ? 0xffd23f : 0xffffff, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
+    const m = new THREE.Mesh(SPARK_GEO[big ? 1 : 0], new THREE.MeshBasicMaterial({ color: big ? 0xffd23f : 0xffffff, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide }));
     m.position.set(x, y, z);
     m.lookAt(this.camera.position);
     this.scene.add(m);
@@ -468,15 +486,8 @@ export class World {
       sp.mesh.rotation.z += dt * 6;
       (sp.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k);
     }
-    for (const list of [this.rings, this.sparks]) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        if (list[i]!.t > 0.5) {
-          this.scene.remove(list[i]!.mesh);
-          list[i]!.mesh.geometry.dispose();
-          list.splice(i, 1);
-        }
-      }
-    }
+    this.reap(this.rings);
+    this.reap(this.sparks);
     // Ball squash for 70 ms after a bounce.
     this.squashT += dt;
     const sq = this.squashT < 0.07 ? 1 - 0.35 * Math.sin((this.squashT / 0.07) * Math.PI) : 1;
@@ -484,6 +495,15 @@ export class World {
     // Gentle pool shimmer.
     const sh = 0.5 + 0.5 * Math.sin(this.clock * 1.3);
     for (const m of this.pool) m.color.setRGB(0.36 + sh * 0.04, 0.81 + sh * 0.03, 0.88 + sh * 0.02);
+  }
+
+  private reap(list: Array<{ mesh: THREE.Mesh; t: number }>): void {
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i]!.t <= 0.5) continue;
+      this.scene.remove(list[i]!.mesh);
+      (list[i]!.mesh.material as THREE.Material).dispose(); // geometry is shared
+      list.splice(i, 1);
+    }
   }
 
   setLooks(near: Look, far: Look): void {
@@ -522,17 +542,21 @@ export class World {
     // Ghost trail above the speed threshold.
     const v = game.ball.v;
     const fast = game.ballLive && Math.hypot(v.x, v.y, v.z) > game.cfg.render.trailMinSpeed;
-    this.hist.unshift(new THREE.Vector3(b.x, b.y, b.z));
-    if (this.hist.length > GHOSTS * 2 + 1) this.hist.pop();
-    this.ghosts.forEach((g, i) => {
-      const p = this.hist[(i + 1) * 2];
-      g.visible = fast && !!p;
-      if (p) g.position.copy(p);
-    });
+    const n = this.hist.length;
+    this.histHead = (this.histHead + n - 1) % n;
+    this.hist[this.histHead]!.set(b.x, b.y, b.z);
+    this.histCount = Math.min(this.histCount + 1, n);
+    for (let i = 0; i < this.ghosts.length; i++) {
+      const back = (i + 1) * 2;
+      const g = this.ghosts[i]!;
+      g.visible = fast && back < this.histCount;
+      if (g.visible) g.position.copy(this.hist[(this.histHead + back) % n]!);
+    }
 
-    for (const side of [0, 1] as const) this.syncAvatar(game, side, side === 0 ? humanQ : null);
+    this.syncAvatar(game, 0, humanQ);
+    this.syncAvatar(game, 1, null);
     this.updateFx(dt);
-    for (const [i, p] of this.palms.entries()) p.rotation.x = Math.sin(this.clock * 0.8 + i) * 0.02;
+    for (let i = 0; i < this.palms.length; i++) this.palms[i]!.rotation.x = Math.sin(this.clock * 0.8 + i) * 0.02;
     this.updateCamera(game, dt);
   }
 
@@ -572,24 +596,25 @@ export class World {
     const handSide = p.forehand ? 1 : -1;
     const c = game.contact;
     const targetY = c && c.side === side ? c.p.y : TABLE_TOP + 0.15;
-    const pos = new THREE.Vector3(p.x + sign * handSide * 0.42, 0, p.z - sign * (0.32 + swingAnim * 0.3));
-    pos.y = THREE.MathUtils.lerp(a.paddle.position.y || targetY, targetY, 0.15);
-    a.paddle.position.copy(pos);
+    _pos.set(p.x + sign * handSide * 0.42, 0, p.z - sign * (0.32 + swingAnim * 0.3));
+    _pos.y = THREE.MathUtils.lerp(a.paddle.position.y || targetY, targetY, 0.15);
+    a.paddle.position.copy(_pos);
 
-    const base = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), side === 0 ? 0 : Math.PI);
-    const rel = q ? new THREE.Quaternion(q[0], q[1], q[2], q[3]) : new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.15);
-    const swingTilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -handSide * swingAnim * 0.6);
-    a.paddle.quaternion.copy(base).multiply(swingTilt).multiply(rel);
+    _base.copy(BASE_Q[side]);
+    if (q) _rel.set(q[0], q[1], q[2], q[3]);
+    else _rel.copy(IDLE_TILT);
+    _tilt.setFromAxisAngle(Y_AXIS, -handSide * swingAnim * 0.6);
+    a.paddle.quaternion.copy(_base).multiply(_tilt).multiply(_rel);
   }
 
   private updateCamera(game: Game, dt: number): void {
     const me = game.players[0];
     // Behind and above the near player, looking down the table (design 1E key art).
-    const want = new THREE.Vector3(me.x + 0.75, 2.75, Math.max(me.z, HALF_L + 0.4) + 2.1);
-    const look = new THREE.Vector3(me.x * 0.3 + 0.15, TABLE_TOP - 0.15, -0.85);
+    _want.set(me.x + 0.75, 2.75, Math.max(me.z, HALF_L + 0.4) + 2.1);
+    _look.set(me.x * 0.3 + 0.15, TABLE_TOP - 0.15, -0.85);
     const k = 1 - Math.exp(-dt * 4);
-    this.camPos.lerp(want, k);
-    this.camLook.lerp(look, k);
+    this.camPos.lerp(_want, k);
+    this.camLook.lerp(_look, k);
     this.camera.position.copy(this.camPos);
     this.shakeT += dt;
     const dur = 0.06 * this.shakeHits;

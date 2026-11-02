@@ -37,7 +37,18 @@ export default defineConfig({
         display: resolve(import.meta.dirname, 'index.html'),
         controller: resolve(import.meta.dirname, 'controller.html'),
       },
+      // Vendor chunks change rarely, so they stay cached across deploys. three is display-only;
+      // react is shared with the phone page.
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'three', test: /node_modules[\/]three[\/]/ },
+            { name: 'react', test: /node_modules[\/](react|react-dom|scheduler)[\/]/ },
+          ],
+        },
+      },
     },
+    chunkSizeWarningLimit: 700,
   },
   test: { include: ['tests/**/*.test.ts'] },
 });

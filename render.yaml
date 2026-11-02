@@ -1,0 +1,18 @@
+# Render Blueprint: one free Node web service in Virginia (US East). Render terminates HTTPS
+# (required for phone motion sensors) and proxies WebSockets to the same process.
+# Free plan: sleeps after 15 min without HTTP requests or WebSocket messages; the next visit wakes it (~30-60 s).
+services:
+  - type: web
+    name: pocket-sports
+    runtime: node
+    plan: free
+    region: virginia
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    # node directly (not npm start) so SIGTERM on redeploy reaches the server's graceful shutdown.
+    startCommand: node server/index.ts
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"

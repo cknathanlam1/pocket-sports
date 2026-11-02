@@ -66,12 +66,21 @@ export class PhoneSession {
     this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null, score: null, lastPoint: null, nextYou: false, wasLinked: false, dev: new URLSearchParams(location.search).has('dev'), recording: false, recCount: { events: 0, swings: 0 }, lastSwing: null, axisLocked: false, menu: null };
     const pid = phoneId();
 
+    // A not-found right after a server restart usually means the laptop hasn't re-created the room yet,
+    // so keep retrying quietly for a minute (the not-found screen shows meanwhile).
+    let retries = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     this.conn.onOpen(() => this.conn.send({ k: 'join', code: room, pid }));
     this.conn.on((m) => {
       if (m.k === 'joined') {
+        retries = 0;
         if (this.state.step === 'connecting' || this.state.step === 'not-found') this.set({ step: this.q ? (this.q0 ? 'play' : 'calibrate') : 'motion' });
       } else if (m.k === 'err') {
-        if (m.e === 'room-not-found') this.set({ step: 'not-found' });
+        if (m.e === 'room-not-found') {
+          this.set({ step: 'not-found' });
+          clearTimeout(retryTimer);
+          if (retries++ < 20) retryTimer = setTimeout(() => this.conn.send({ k: 'join', code: room, pid }), 3000);
+        }
         if (m.e === 'replaced') {
           this.set({ step: 'replaced' });
           this.conn.close();

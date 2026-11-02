@@ -6,7 +6,7 @@ import { Calibrate } from './screens/Calibrate.tsx';
 import { Customize } from './screens/Customize.tsx';
 import { Hud } from './screens/Hud.tsx';
 import { Menu, Setup } from './screens/Menu.tsx';
-import { Paused, Results, Toast } from './screens/Overlays.tsx';
+import { Paused, Results, ServerBanner, Toast } from './screens/Overlays.tsx';
 import { Pairing, Title } from './screens/Pairing.tsx';
 import { PracticeHud } from './screens/Practice.tsx';
 import { Tutorial } from './screens/Tutorial.tsx';
@@ -28,6 +28,7 @@ export function App({ rt }: { rt: Runtime }) {
       {screen === 'customize' && <Customize rt={rt} />}
       {screen === 'paused' && <Paused rt={rt} />}
       {screen === 'matchOver' && <Results rt={rt} />}
+      <ServerBanner rt={rt} />
       <Toast />
       {devOpen && <DevPanel rt={rt} />}
     </>

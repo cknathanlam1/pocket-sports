@@ -273,3 +273,9 @@
 .win-check { width: 56px; height: 56px; border-radius: 50%; background: var(--win); color: #fff; font: 800 30px var(--font-display); display: grid; place-items: center; flex: none; }
 .win-title { font: 800 24px var(--font-display); color: #1F7A48; }
 .try-card { background: var(--cream-200); border: 2px dashed var(--cobalt-200); border-radius: 18px; padding: 22px; font: 600 18px var(--font-ui); color: var(--ink-500); }
+
+/* Error states (M5) */
+.server-banner { position: absolute; left: 50%; top: 28px; transform: translateX(-50%); display: flex; gap: 18px; align-items: center; width: 820px; box-sizing: border-box; background: var(--cream-50); border: 3px solid var(--coral-600); border-radius: 20px; box-shadow: 0 6px 0 var(--coral-600); padding: 16px 22px; pointer-events: auto; z-index: 40; }
+.server-banner > div { flex: 1; }
+.fatal { position: fixed; inset: 0; display: grid; place-items: center; background: var(--cream-100); padding: 24px; box-sizing: border-box; }
+.fatal-card { max-width: 620px; background: var(--cream-50); border: 3px solid var(--cobalt-500); border-radius: 28px; box-shadow: var(--sh-card); padding: 40px; display: flex; flex-direction: column; gap: 16px; }

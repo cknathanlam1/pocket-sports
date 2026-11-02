@@ -2,7 +2,7 @@
 
 Browser game: the laptop renders a 3D table tennis match (Three.js); a phone joins by QR
 code (no install) and becomes a motion-controlled paddle. Built milestone by milestone
-(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M4 built** (procedural audio, practice ball machine, quick-lesson tutorial, point poses + table/hit VFX) on top of M3 phone swings and the Claude Design reskin. Real-phone verification is pending.
+(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M5 built** (Render deploy config, production server hardening, error states, performance pass) on top of M4 audio/practice/tutorial, M3 phone swings and the Claude Design reskin. First deploy and real-phone verification are pending.
 
 ## Commands
 - Windows PowerShell blocks `npm.ps1`: use `npm.cmd ...` there (or Git Bash / cmd).
@@ -11,7 +11,7 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `npm test` / `npm run test:watch`: Vitest (`tests/**/*.test.ts`)
 - `npm run fixtures`: regenerate the synthetic sensor recordings in `tests/fixtures/recordings/`
 - `npm run typecheck`: `tsc --noEmit` (strict)
-- `npm run build && npm start`: production. One Node process serves `dist/` + `/ws` on `$PORT` (default 8787)
+- `npm run build && npm start`: production. One Node process serves `dist/` + `/ws` on `$PORT` (default 8787). `/healthz` reports room and socket counts.
 
 ## Architecture
 - `/design`: Claude Design reference, read-only: `tokens/` (design-system CSS, verbatim) and `SPEC.md` (a digest of every screen, game token, hit tier, motion/sound rule and the 3D asset list). **Visuals: /design wins. Behavior: the spec wins.**
@@ -93,6 +93,20 @@ Conventions: TS strict + `erasableSyntaxOnly` (no enums or parameter properties)
 directly on Node ≥22.18 type stripping. Import local files with explicit `.ts`/`.tsx` extensions and use `import type` for types.
 Quaternions on the wire are `[x,y,z,w]`. Ask before adding dependencies beyond: vite, typescript, three, react, ws, vitest, qrcode-generator.
 
+### M5: deploy, error states, performance
+- **Hosting: Render free web service, Virginia (US East)**, defined in `render.yaml` (Blueprint). Render terminates HTTPS and proxies WebSockets.
+  Build `npm ci && npm run build`, start `node server/index.ts` (not `npm start`, so SIGTERM reaches the server), health check `/healthz`, `NODE_VERSION=24`, auto-deploy on push to `main`.
+  Free-plan behavior: the service sleeps after 15 min with no HTTP requests or WebSocket messages, and the next visit waits ~30–60 s while it wakes. An active match keeps it awake. Upgrading to Starter ($7/mo) removes the sleep.
+- First deploy (you): render.com → New → Blueprint → connect GitHub repo `cknathanlam1/pocket-sports` → apply. The URL is `https://pocket-sports.onrender.com` (or with a suffix if that name is taken).
+- `server/static.ts`: serves `dist/` from memory, brotli/gzip precompressed on first request, ETag/304, immutable cache for hashed `/assets/`, `no-cache` for pages, GET/HEAD only,
+  security headers (nosniff, referrer policy, `X-Frame-Options: DENY`, COOP). No CSP yet: fonts come from Google Fonts and jsDelivr. `server/index.ts`: ws `maxPayload` 64 KB, graceful shutdown on SIGTERM (closes sockets with 1012 so clients reconnect).
+- Restarts are survivable: rooms live in memory, so a redeploy or wake-up loses them, but `resume` re-creates the display's room under the same code and token if the code is free, and the phone retries `join` every 3 s (20 tries) after a not-found. Pairing survives a restart without rescanning.
+- Error states. Laptop: WebGL 2 missing or renderer failure → full-page message (`display/main.tsx`), server unreachable for 4 s → top banner with Retry now (`ServerBanner` in `Overlays.tsx`; play continues with the mouse), room expired → toast with the new code.
+  Phone: Room not found (with retry), motion blocked/unsupported/insecure, a "still trying… server may be waking up" hint after 8 s of joining.
+- Performance: `World.sync` allocates nothing per frame (scratch vectors and quaternions, a ring buffer for the trail, shared FX geometry; FX materials are now disposed, which was a leak).
+  Rendering is skipped on opaque screens (setup, customize, calibrate, tutorial). Adaptive resolution: pixel ratio starts at min(dpr, `render.maxPixelRatio`) and steps down 0.25 while 2 s windows average over `render.slowFrameMs`. It is one-way per session.
+  Vendor chunks `three` (133 KB gz) and `react` (68 KB gz) are split out so they stay cached across deploys. The phone page loads about 80 KB gz of JS. Fonts get preconnect hints.
+
 ## Phone testing over HTTPS
 iOS only exposes motion sensors in a secure context, so plain `http://<lan-ip>:5173` won't do.
 
@@ -115,6 +129,6 @@ Desktop testing without a phone: open `/p/CODE` in a mobile-sized tab and dispat
 ## Status / known gaps
 - Mouse swings still work alongside the phone (useful for testing).
 - Testing in the hidden Claude browser pane throttles rAF, and with the 0.1 s frame clamp the game then runs slower than real time. Judge timing feel on a real, visible screen.
-- Not yet verified on a real iPhone/Android, or on cellular. No TURN server: symmetric NATs fall back to the relay by design.
+- Not yet deployed (needs the Render Blueprint step above). Not yet verified on a real iPhone/Android, or on cellular. The WebGL fallback screen hasn't been seen in a browser. No TURN server: symmetric NATs fall back to the relay by design.
 - Still primitives, not GLTF: characters, venue and props are toon-shaded Three.js primitives (design/SPEC.md has the asset list for real models).
 - The repo lives in OneDrive. Consider excluding `node_modules` from sync.

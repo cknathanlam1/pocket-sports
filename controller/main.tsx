@@ -220,6 +220,16 @@ function RoomInput() {
   );
 }
 
+/** "Finding your laptop…", then after a while a hint that the server or the signal may be the problem. */
+function SlowJoin() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(id);
+  }, []);
+  return <div className="p-body">{slow ? 'Still trying… check your signal. If the laptop page just opened, the server may be waking up (up to a minute).' : 'Finding your laptop…'}</div>;
+}
+
 function App() {
   const st = usePhone(session);
   const landscape = useLandscape();
@@ -238,7 +248,7 @@ function App() {
           <div className="progress">
             <div />
           </div>
-          <div className="p-body">Finding your laptop…</div>
+          <SlowJoin />
         </div>
       );
       break;

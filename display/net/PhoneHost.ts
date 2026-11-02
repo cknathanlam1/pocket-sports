@@ -69,6 +69,11 @@ export class PhoneHost {
     this.set({ transport, phone, rtt: transport === 'none' ? null : this.input.rtt === null ? null : Math.round(this.input.rtt) });
   }
 
+  /** "Retry now" on the server-down banner: skip the reconnect backoff. */
+  reconnectNow(): void {
+    this.conn.reconnectNow();
+  }
+
   send(m: DisplayMsg): void {
     this.link.send(m);
   }
