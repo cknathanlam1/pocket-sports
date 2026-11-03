@@ -121,4 +121,34 @@ describe('rooms', () => {
     expect(rooms.sweep()).toEqual([room.code]);
     expect(rooms.has(room.code)).toBe(false);
   });
+
+  it('match rooms join two laptops: one guest seat, no cross-kind joins', () => {
+    const rooms = new Rooms();
+    const host = new FakeSock();
+    rooms.connect(host);
+    rooms.message(host, JSON.stringify({ k: 'create', kind: 'match' }));
+    const code = host.last('room')!.code;
+    // A phone with this code gets "not found": it isn't a pairing room.
+    const phone = new FakeSock();
+    rooms.connect(phone);
+    rooms.message(phone, JSON.stringify({ k: 'join', code, pid: 'ph' }));
+    expect(phone.last('err')?.e).toBe('room-not-found');
+    const guest = new FakeSock();
+    rooms.connect(guest);
+    rooms.message(guest, JSON.stringify({ k: 'join', code, pid: 'g1', kind: 'match' }));
+    expect(guest.last('joined')?.code).toBe(code);
+    expect(host.last('peer')?.up).toBe(true);
+    // A third laptop can't take the seat; the same guest tab can rejoin.
+    const third = new FakeSock();
+    rooms.connect(third);
+    rooms.message(third, JSON.stringify({ k: 'join', code, pid: 'g2', kind: 'match' }));
+    expect(third.last('err')?.e).toBe('room-full');
+    const again = new FakeSock();
+    rooms.connect(again);
+    rooms.message(again, JSON.stringify({ k: 'join', code, pid: 'g1', kind: 'match' }));
+    expect(again.last('joined')?.code).toBe(code);
+    // Relay goes host ↔ guest.
+    rooms.message(again, JSON.stringify({ k: 'relay', m: { k: 'vbye' } }));
+    expect(host.last('relay')?.m).toEqual({ k: 'vbye' });
+  });
 });

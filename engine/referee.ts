@@ -12,6 +12,16 @@ export type Verdict =
 
 const CONTINUE: Verdict = { kind: 'continue' };
 
+export interface RefereeState {
+  hitter: Side;
+  isServe: boolean;
+  struck: boolean;
+  bounces: Side[];
+  netTouched: boolean;
+  netBlocked: boolean;
+  done: boolean;
+}
+
 export class Referee {
   /** Side holding/tossing the serve, or the last hitter during a rally. */
   hitter: Side = 0;
@@ -23,6 +33,15 @@ export class Referee {
   netTouched = false;
   netBlocked = false;
   done = false;
+
+  /** Copy of the mutable state, for rewinding when a late network hit arrives. */
+  snapshot(): RefereeState {
+    return { hitter: this.hitter, isServe: this.isServe, struck: this.struck, bounces: [...this.bounces], netTouched: this.netTouched, netBlocked: this.netBlocked, done: this.done };
+  }
+
+  restore(s: RefereeState): void {
+    Object.assign(this, s, { bounces: [...s.bounces] });
+  }
 
   startPoint(server: Side): void {
     this.hitter = server;

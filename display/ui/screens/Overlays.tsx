@@ -1,6 +1,6 @@
 // 2p Paused, 2r Connection lost (auto-paused), 2q Results, and toasts.
 import { useEffect, useState } from 'react';
-import { Char, MARLO_LOOK } from '../../../shared/art/Char.tsx';
+import { Char } from '../../../shared/art/Char.tsx';
 import type { Runtime } from '../../runtime.ts';
 import { store, useUi } from '../../store.ts';
 import { Qr } from '../Qr.tsx';
@@ -8,32 +8,46 @@ import { Stage, Wash } from '../Stage.tsx';
 import { Confetti } from './Hud.tsx';
 
 export function Paused({ rt }: { rt: Runtime }) {
-  const { pauseReason, phone, hud, usingPhone, mode } = useUi();
+  const { pauseReason, phone, hud, usingPhone, mode, opponent, vs } = useUi();
   if (pauseReason === 'phone') return <ConnectionLost rt={rt} />;
+  const online = mode === 'versus';
+  const lost = online && pauseReason === 'opponent';
   return (
     <>
       <Wash color="rgba(14,36,73,.55)" />
       <Stage>
         <div className="center-modal" data-ui>
           <div className="modal panel-in" style={{ width: 560 }}>
-            <div className="modal-title">Paused</div>
+            <div className="modal-title">{lost ? `Waiting for ${opponent.name}` : pauseReason === 'remote' ? `${opponent.name} paused` : 'Paused'}</div>
             <div className="row-desc" style={{ fontSize: 19 }}>
-              {usingPhone ? 'Phone: tap the pause button to resume, or pick here.' : 'Press Esc to resume, or pick here.'}
+              {lost
+                ? 'Their connection dropped. The match picks up again as soon as they’re back.'
+                : online
+                  ? 'Resuming replays the rally from the serve, for both of you.'
+                  : usingPhone
+                    ? 'Phone: tap the pause button to resume, or pick here.'
+                    : 'Press Esc to resume, or pick here.'}
             </div>
-            <button className="btn primary big" onClick={() => rt.resume()} autoFocus>
-              Resume
-            </button>
+            {lost ? (
+              <button className="btn primary big" onClick={() => rt.vs?.reconnectNow()}>
+                Retry now
+              </button>
+            ) : (
+              <button className="btn primary big" onClick={() => rt.resume()} disabled={online && vs?.transport === 'none'} autoFocus>
+                Resume
+              </button>
+            )}
             {phone.phone !== 'none' && (
               <button className="btn" onClick={() => store.toast('Hold your phone like a paddle and double-tap it', 'i')}>
                 Recalibrate phone
               </button>
             )}
             <button className="btn" onClick={() => rt.quitToMenu()}>
-              {mode === 'practice' ? 'End practice' : 'Quit to menu'}
+              {mode === 'practice' ? 'End practice' : online ? 'Leave match' : 'Quit to menu'}
             </button>
           </div>
         </div>
-        {hud && mode === 'match' && <div className="paused-score">{hud.points.join(' – ')}</div>}
+        {hud && mode !== 'practice' && <div className="paused-score">{hud.points.join(' – ')}</div>}
       </Stage>
     </>
   );
@@ -89,8 +103,10 @@ function ConnectionLost({ rt }: { rt: Runtime }) {
 }
 
 export function Results({ rt }: { rt: Runtime }) {
-  const { winner, hud, settings, stats, look } = useUi();
+  const { winner, hud, settings, stats, look, opponent, mode, vs } = useUi();
   const won = winner === 0;
+  const online = mode === 'versus';
+  const canRematch = !online || vs?.role === 'host';
   const games = hud?.games ?? [0, 0];
   const cards = [
     { l: 'Longest rally', v: `${stats[0].longest}`, o: `${stats[1].longest}` },
@@ -107,14 +123,14 @@ export function Results({ rt }: { rt: Runtime }) {
           <div className="results-left">
             <div className="results-disc" />
             <div style={{ position: 'relative', marginBottom: 60 }}>
-              <Char size={600} pose={won ? 'cheer' : 'sad'} look={won ? look : MARLO_LOOK} paddle={won ? '#2F6FDB' : '#FF8A1F'} />
+              <Char size={600} pose={won ? 'cheer' : 'sad'} look={won ? look : opponent.look} paddle={won ? '#2F6FDB' : '#FF8A1F'} />
             </div>
           </div>
           <div className="results-right">
-            <div className="results-title">{won ? 'You win!' : 'Marlo wins'}</div>
+            <div className="results-title">{won ? 'You win!' : `${opponent.name} wins`}</div>
             <div className="results-chips">
               <span className="res-chip p1">● You {games[0]}</span>
-              <span className="res-chip p2">◆ Marlo {games[1]}</span>
+              <span className="res-chip p2">◆ {opponent.name} {games[1]}</span>
               <span className="res-games">{hud?.history.map(([a, b]) => `${a}–${b}`).join(' · ')}</span>
             </div>
             <div className="stat-grid">
@@ -122,16 +138,22 @@ export function Results({ rt }: { rt: Runtime }) {
                 <div key={c.l} className="stat-card">
                   <div className="stat-l">{c.l}</div>
                   <div className="stat-v">{c.v}</div>
-                  <div className="stat-o">Marlo: {c.o}</div>
+                  <div className="stat-o">{opponent.name}: {c.o}</div>
                 </div>
               ))}
             </div>
             <div className="results-actions">
-              <button className="btn primary big" style={{ flex: 1.4 }} onClick={() => rt.startMatch(settings)} autoFocus>
-                Rematch
-              </button>
+              {canRematch ? (
+                <button className="btn primary big" style={{ flex: 1.4 }} onClick={() => (online ? rt.hostStartVersus(settings.bestOf) : rt.startMatch(settings))} disabled={online && vs?.transport === 'none'} autoFocus>
+                  Rematch
+                </button>
+              ) : (
+                <div className="script" style={{ flex: 1.4, font: '600 28px var(--font-script)', color: 'var(--coral-600)' }}>
+                  {opponent.name} can start a rematch…
+                </div>
+              )}
               <button className="btn big" style={{ flex: 1 }} onClick={() => rt.quitToMenu()}>
-                Menu
+                {online ? 'Lobby' : 'Menu'}
               </button>
             </div>
           </div>

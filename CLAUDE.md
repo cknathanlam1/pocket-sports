@@ -107,6 +107,19 @@ Quaternions on the wire are `[x,y,z,w]`. Ask before adding dependencies beyond: 
   Rendering is skipped on opaque screens (setup, customize, calibrate, tutorial). Adaptive resolution: pixel ratio starts at min(dpr, `render.maxPixelRatio`) and steps down 0.25 while 2 s windows average over `render.slowFrameMs`. It is one-way per session.
   Vendor chunks `three` (133 KB gz) and `react` (68 KB gz) are split out so they stay cached across deploys. The phone page loads about 80 KB gz of JS. Fonts get preconnect hints.
 
+### Online 2-player ("Play a friend")
+Each player uses their own laptop (and optionally their own phone; the mouse works too). Menu → Play a friend creates a match and shows an invite link `/?vs=CODE` (QR + copy). The friend opens it, or types the code in the lobby.
+- **Transport:** each laptop opens a second socket and a `'match'` room (`server/rooms.ts`: host in the display slot, guest in the phone slot, one guest seat, codes can't be joined across kinds).
+  `PeerLink` is generic now (`PeerLink<Out, In>(conn, offerer)`), so the laptop↔laptop link is the same WebRTC-with-relay link as the phone. `display/net/VersusLink.ts` runs the lobby and the RTT median (4 pings/s).
+- **Netcode (`engine/game.ts` net mode, `engine/net.ts`):** each laptop runs its own `Game` with its own player as side 0 (near end) and the other as `'remote'`. Only events cross the wire, rotated 180° about y (x→−x, z→−z, sides swap):
+  toss, hit (the full launch state, resolved by the hitter), and verdict (host only). Times travel as ages, so no clock sync is needed: the receiver places an event at now − (age + RTT/2) and rewinds/re-simulates (ring buffer + a referee-state log).
+  Your own swings are judged locally against your own ball, so internet latency never touches your timing. The opponent's hits arrive RTT/2 late, and the ball skips ahead by that much (`World.nudgeBall` eases the jump over ~70 ms).
+  **The host is the referee:** the guest never calls points; it applies the host's verdict to the host's pre-point score. While the remote player could still hit, the host holds a ruling for `netGraceMs` = RTT + 150 ms so a late return isn't thrown away.
+- Pausing (either side, or a phone drop) pauses both; resuming replays the rally from the serve. A dropped opponent pauses the match; when the link returns, the host re-sends `vgo` with the score, so a guest who reloaded rejoins mid-match. Hit-stop is off online (it would stall one laptop's sim).
+  The opponent's paddle tilt streams at ~30 Hz (`vpq`). The far player's name/look come from `vhi`. Each player's own assist level applies to their own swings. The host picks best-of and starts and rematches.
+- Tests: `tests/net.test.ts` plays whole matches between two `Game`s over a fake network at 0/40/90 ms one-way (identical results, ball views within 5 cm). It also shows the grace window keeps returns at 300 ms one-way. `tests/rooms.test.ts` covers match rooms.
+- Known limits: if the host reloads, the match ends (the guest can leave from the pause card). The host decides close calls (tiny cross-browser float drift could disagree on an edge ball). Clients are trusted (fine for friends, not for strangers).
+
 ## Phone testing over HTTPS
 iOS only exposes motion sensors in a secure context, so plain `http://<lan-ip>:5173` won't do.
 

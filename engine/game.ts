@@ -14,13 +14,27 @@ import {
   sideSign,
   stepBall,
 } from './physics.ts';
-import { Referee, type PointReason, type Verdict } from './referee.ts';
+import { Referee, type PointReason, type RefereeState, type Verdict } from './referee.ts';
 import { type Rng, createRng } from './rng.ts';
 import { type BestOf, type Score, awardPoint, currentServer, newScore } from './rules.ts';
 import { type ShotError, type SwingFeatures, type TimingClass, classifyTiming, humanIntent, resolveShot } from './shot.ts';
 import { type V3, clamp, len, v3 } from './vec.ts';
 
-export type Controller = 'human' | 'cpu' | 'machine';
+/** 'remote': the other laptop in an online match. Its hits arrive as network events (remoteHit/remoteToss). */
+export type Controller = 'human' | 'cpu' | 'machine' | 'remote';
+
+/** A ruling that ends the rally (anything but 'continue'). */
+export type FinalVerdict = Exclude<Verdict, { kind: 'continue' }>;
+
+/**
+ * Events an online match sends to the other laptop. Times are this game's sim time; the net layer turns
+ * them into ages so the receiver can place them on its own clock. Positions are in this game's frame.
+ */
+export type NetOut =
+  | { k: 'toss'; t: number }
+  | { k: 'hit'; t: number; ball: Ball; serve: boolean }
+  /** Host only: a ruling, plus the score just before it so the guest applies it to an identical score. */
+  | { k: 'verdict'; v: FinalVerdict; pre: Score };
 
 /** Practice ball machine (side 1). Speed is horizontal pace in m/s. */
 export interface MachineSettings {
@@ -44,6 +58,11 @@ export interface GameSettings {
   /** 'practice': side 1 is a ball machine, no score; returns build a streak. */
   mode?: 'match' | 'practice';
   machine?: MachineSettings;
+  /**
+   * Online match: side 0 is this laptop's player, side 1 is 'remote'. Each laptop judges its own player's
+   * hits; the authority (host) alone calls points, waiting `netGraceMs` for a late remote hit first.
+   */
+  net?: { authority: boolean };
 }
 
 export type GameEvent =
@@ -128,6 +147,14 @@ export class Game {
   private ring: RingEntry[] = [];
   private events: GameEvent[] = [];
   private cpuDone = false; // CPU already acted on the current contact
+  /** Online: events for the other laptop (drain with drainNet). */
+  private outbox: NetOut[] = [];
+  /** Online, host: a ruling held back in case the remote player's hit is still in flight. */
+  private pending: { v: FinalVerdict; t: number; deadline: number } | null = null;
+  /** Referee state over the ring-buffer window, so a late remote hit is judged from the state it happened in. */
+  private refLog: Array<{ t: number; s: RefereeState }> = [];
+  /** Online, host: how long (real ms) to hold a ruling that a remote hit could still overturn. Set from RTT. */
+  netGraceMs = 250;
 
   constructor(settings: GameSettings, cfg: Config) {
     this.cfg = cfg;
@@ -159,6 +186,17 @@ export class Game {
     return (this.settings.machine ??= { speed: 6, spin: 'none', placement: 'middle', intervalMs: 900 });
   }
 
+  drainNet(): NetOut[] {
+    const o = this.outbox;
+    this.outbox = [];
+    return o;
+  }
+
+  /** Index of the remote side, if this is an online match. */
+  get remoteSide(): Side | null {
+    return this.settings.controllers[1] === 'remote' ? 1 : this.settings.controllers[0] === 'remote' ? 0 : null;
+  }
+
   drainEvents(): GameEvent[] {
     const e = this.events;
     this.events = [];
@@ -184,6 +222,11 @@ export class Game {
   private stepSim(): void {
     const dt = this.dt;
     this.simTime += dt;
+    if (this.pending && this.simTime >= this.pending.deadline) {
+      const v = this.pending.v;
+      this.pending = null;
+      this.commitVerdict(v);
+    }
 
     if (this.phase === 'serve') {
       this.holdBall();
@@ -206,19 +249,61 @@ export class Game {
     // Lag-compensation window: hit.ringBufferMs of real time, expressed in sim steps.
     const max = Math.ceil((this.cfg.physics.stepHz * this.cfg.hit.ringBufferMs * this.cfg.physics.gameSpeed) / 1000) + 2;
     if (this.ring.length > max) this.ring.splice(0, this.ring.length - max);
-    if (e) this.onPhysEvent(e);
+    const oldest = this.ring[0]!.t;
+    while (this.refLog.length > 1 && this.refLog[1]!.t <= oldest) this.refLog.shift();
+    if (e) this.onPhysEvent(e, this.simTime);
   }
 
-  private onPhysEvent(e: PhysEvent): void {
+  private onPhysEvent(e: PhysEvent, t: number): void {
     if (e.type === 'table') this.events.push({ type: 'bounce', side: e.side, speed: e.speed });
     else if (e.type === 'net') this.events.push({ type: 'net', kind: e.kind });
     else this.events.push({ type: 'floor' });
     if (this.phase !== 'toss' && this.phase !== 'rally') return;
-    this.applyVerdict(this.referee.onEvent(e));
+    const v = this.referee.onEvent(e);
+    this.logRef(t);
+    if (v.kind !== 'continue') this.rule(v, t);
   }
 
-  private applyVerdict(v: Verdict): void {
-    if (v.kind === 'continue') return;
+  private logRef(t: number): void {
+    this.refLog.push({ t, s: this.referee.snapshot() });
+  }
+
+  /** Restore the referee as it was at sim time t (latest snapshot at or before t). */
+  private restoreRef(t: number): void {
+    let i = this.refLog.length - 1;
+    while (i > 0 && this.refLog[i]!.t > t + 1e-9) i--;
+    const e = this.refLog[i];
+    if (!e) return;
+    this.referee.restore(e.s);
+    this.refLog.length = i + 1;
+  }
+
+  /** Online: only the host rules, and it waits for a remote hit that could still be on its way. */
+  private rule(v: FinalVerdict, t: number): void {
+    const net = this.settings.net;
+    if (!net) return this.applyVerdict(v);
+    if (!net.authority) return; // the host's verdict will arrive
+    if (this.remoteCouldHit()) {
+      this.pending = { v, t, deadline: t + (this.netGraceMs / 1000) * this.cfg.physics.gameSpeed };
+      return;
+    }
+    this.commitVerdict(v);
+  }
+
+  /** The remote player may still strike this ball: they're serving and haven't hit, or ours was the last hit. */
+  private remoteCouldHit(): boolean {
+    const r = this.remoteSide;
+    if (r === null) return false;
+    return this.referee.struck ? this.referee.hitter !== r : this.referee.hitter === r;
+  }
+
+  private commitVerdict(v: FinalVerdict): void {
+    const s = this.score;
+    this.outbox.push({ k: 'verdict', v, pre: { ...s, points: [...s.points], games: [...s.games], history: s.history.map((h) => [...h] as [number, number]) } });
+    this.applyVerdict(v);
+  }
+
+  private applyVerdict(v: FinalVerdict): void {
     this.contact = null;
     if (v.kind === 'retoss') {
       this.lastPoint = { winner: null, reason: 'retoss' };
@@ -289,6 +374,9 @@ export class Game {
     this.contact = null;
     this.ballLive = false;
     this.ring = [];
+    this.pending = null;
+    this.refLog = [];
+    this.logRef(this.simTime);
     this.rallyShots = 0;
     this.cpuDone = false;
     for (const side of [0, 1] as const) {
@@ -321,7 +409,58 @@ export class Game {
     this.cpuDone = false;
     this.contact = this.predictTossContact(side);
     this.events.push({ type: 'toss', side });
+    if (!fromCpu && this.settings.net) this.outbox.push({ k: 'toss', t: this.simTime });
     return true;
+  }
+
+  // ───────────────────────── Online (remote laptop) ─────────────────────────
+
+  /** The remote player tossed at sim time t (already converted to our clock). */
+  remoteToss(t: number): boolean {
+    const r = this.remoteSide;
+    if (r === null || this.phase === 'matchOver') return false;
+    // We may still be in the between-points pause the remote already finished.
+    if (this.phase === 'pointOver' && this.winner === null) this.setupServe();
+    if (this.phase !== 'serve' || this.server !== r) return false;
+    this.toss(r, true);
+    const from = clamp(t, this.simTime - 0.5 * this.cfg.physics.gameSpeed, this.simTime);
+    this.ring = [{ t: from, ball: cloneBall(this.ball) }];
+    this.replay(from);
+    return true;
+  }
+
+  /**
+   * The remote player struck the ball at sim time t (our clock) with the launch state they resolved.
+   * Rewinds to t, so the trajectory matches theirs. Rejected if the ball was already ruled dead before t.
+   */
+  remoteHit(t: number, launched: Ball, serve: boolean): boolean {
+    const r = this.remoteSide;
+    if (r === null || (this.phase !== 'toss' && this.phase !== 'rally')) return false;
+    if (this.pending) {
+      if (t > this.pending.t + 1e-9) return false;
+      this.pending = null;
+    }
+    const tHit = clamp(t, this.ring[0]?.t ?? this.simTime, this.simTime);
+    this.restoreRef(tHit);
+    this.strike(r, launched, tHit, serve);
+    return true;
+  }
+
+  /** Guest: the host's ruling, applied to the same pre-point score so both laptops stay identical. */
+  remoteVerdict(v: FinalVerdict, pre: Score): void {
+    if (this.phase === 'matchOver') return;
+    this.pending = null;
+    this.score.points = [...pre.points];
+    this.score.games = [...pre.games];
+    this.score.history = pre.history.map((h) => [...h] as [number, number]);
+    this.referee.done = true;
+    this.applyVerdict(v);
+  }
+
+  /** Online pause: the rally can't be resumed in sync, so it is replayed from the serve (no score change). */
+  replayPoint(): void {
+    if (this.phase === 'matchOver') return;
+    this.setupServe();
   }
 
   /** Ball machine: launch the next practice ball at the near half. */
@@ -398,6 +537,7 @@ export class Game {
     const pullBack = this.cfg.assist[this.settings.assist].outPullBack;
     const error: ShotError = timing === 'borderline' ? (this.rng.next() < 0.5 ? 'net' : 'long') : 'none';
     const shot = resolveShot(at.ball.p, intent, { hitter: side, isServe, scatter: this.cfg.shot.scatter * (timing === 'borderline' ? 2 : 1), pullBack, errorPullBack: pullBack, error }, this.cfg, this.rng);
+    if (this.settings.net) this.outbox.push({ k: 'hit', t: at.t, ball: cloneBall(shot.ball), serve: isServe });
     this.strike(side, shot.ball, at.t, isServe, offsetMs, timing);
     const strength = clamp(intent.hSpeed / this.cfg.shot.speedCurve.maxSpeed, 0, 1);
     return { result: 'hit', offsetMs, timing, strength };
@@ -405,7 +545,9 @@ export class Game {
 
   /** Apply a hit that happened at sim time `tHit` and fast-forward the new trajectory to now. */
   private strike(side: Side, launched: Ball, tHit: number, isServe: boolean, offsetMs?: number, timing?: TimingClass): void {
+    this.refLog = this.refLog.filter((r) => r.t <= tHit);
     this.referee.onHit(side);
+    this.logRef(tHit);
     this.phase = 'rally';
     this.rallyShots++;
     this.cpuDone = false;
@@ -418,19 +560,24 @@ export class Game {
     this.ring = this.ring.filter((r) => r.t <= tHit);
     this.ring.push({ t: tHit, ball: cloneBall(this.ball) });
     this.contact = this.predictContact(other(side), tHit, isServe);
-    const now = this.simTime;
-    let t = tHit;
-    while (t + this.dt <= now + 1e-9 && this.phase === 'rally') {
-      t += this.dt;
-      const e = stepBall(this.ball, this.dt, this.cfg.physics);
-      this.ring.push({ t, ball: cloneBall(this.ball) });
-      if (e) this.onPhysEvent(e);
-    }
+    this.replay(tHit);
 
     // Hitter recovers toward the centre.
     const p = this.players[side];
     p.targetX = 0;
     p.targetZ = sideSign(side) * (HALF_L + 0.6);
+  }
+
+  /** Step the live ball from sim time `from` up to now (after a rewind), recording and refereeing as it goes. */
+  private replay(from: number): void {
+    const now = this.simTime;
+    let t = from;
+    while (t + this.dt <= now + 1e-9 && (this.phase === 'rally' || this.phase === 'toss')) {
+      t += this.dt;
+      const e = stepBall(this.ball, this.dt, this.cfg.physics);
+      this.ring.push({ t, ball: cloneBall(this.ball) });
+      if (e) this.onPhysEvent(e, t);
+    }
   }
 
   /** Simulate the struck ball to find the receiver's ideal contact (or null if it won't be playable). */

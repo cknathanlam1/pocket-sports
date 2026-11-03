@@ -2,7 +2,7 @@
 // the phone in your hand. Every button sends an `act` message; the laptop stays the source of truth.
 import { Wordmark } from '../shared/art/Logo.tsx';
 import type { MenuMirror } from '../shared/protocol.ts';
-import type { PhoneSession } from './session.ts';
+import { type PhoneSession, usePhone } from './session.ts';
 
 type Key = 'cpuLevel' | 'assist' | 'bestOf';
 
@@ -13,6 +13,7 @@ const ROWS: Array<{ key: Key; title: string; opts: Array<[string | number, strin
 ];
 
 export function PhoneMenu({ s, menu, status }: { s: PhoneSession; menu: MenuMirror; status: React.ReactNode }) {
+  const { op } = usePhone(s);
   if (menu.screen === 'setup') {
     return (
       <div className="screen cream pm">
@@ -49,11 +50,11 @@ export function PhoneMenu({ s, menu, status }: { s: PhoneSession; menu: MenuMirr
     return (
       <div className="screen pm results" style={{ background: menu.won ? 'var(--sun-300)' : 'var(--blush-100)' }}>
         <div className="pm-top end">{status}</div>
-        <div className="pm-result-title">{menu.won ? 'You win!' : 'Marlo wins'}</div>
+        <div className="pm-result-title">{menu.won ? 'You win!' : `${op} wins`}</div>
         {menu.games && (
           <div className="pm-chips">
             <span className="res p1">● You {menu.games[0]}</span>
-            <span className="res p2">◆ Marlo {menu.games[1]}</span>
+            <span className="res p2">◆ {op} {menu.games[1]}</span>
           </div>
         )}
         <button className="p-btn primary" onClick={() => s.act({ k: 'act', a: 'rematch' })}>

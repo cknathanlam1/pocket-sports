@@ -279,3 +279,19 @@
 .server-banner > div { flex: 1; }
 .fatal { position: fixed; inset: 0; display: grid; place-items: center; background: var(--cream-100); padding: 24px; box-sizing: border-box; }
 .fatal-card { max-width: 620px; background: var(--cream-50); border: 3px solid var(--cobalt-500); border-radius: 28px; box-shadow: var(--sh-card); padding: 40px; display: flex; flex-direction: column; gap: 16px; }
+
+/* Online lobby + match */
+.vs-grid { display: grid; grid-template-columns: 300px 1fr 300px; gap: 28px; flex: 1; min-height: 0; }
+.vs-card { background: var(--cream-50); border: 3px solid var(--ink); border-radius: 24px; padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 12px; box-shadow: 0 5px 0 var(--ink); }
+.vs-mid { display: flex; flex-direction: column; gap: 16px; justify-content: center; padding: 0 12px; }
+.vs-code { font: 800 64px/1 var(--font-display); letter-spacing: .18em; color: var(--ink); background: var(--sun-400); border: 3px solid var(--ink); border-radius: 16px; padding: 6px 18px; align-self: flex-start; }
+.vs-link { display: flex; gap: 12px; align-items: center; background: var(--cream-50); border: 3px solid var(--ink); border-radius: 16px; padding: 8px 8px 8px 18px; font: 600 20px var(--font-ui); pointer-events: auto; user-select: text; }
+.vs-link span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-wait { font: 600 30px var(--font-script); color: var(--coral-600); }
+.vs-join { display: flex; gap: 12px; align-items: center; pointer-events: auto; }
+.vs-input { font: 700 22px var(--font-display); text-align: center; width: 100%; box-sizing: border-box; border: 3px solid var(--ink); border-radius: 14px; padding: 8px 12px; background: #fff; color: var(--ink); pointer-events: auto; user-select: text; }
+.vs-input.code { width: 120px; letter-spacing: .2em; text-transform: uppercase; }
+.vs-input:focus { outline: none; box-shadow: 0 0 0 4px var(--sun-400); }
+.vs-status { display: flex; gap: 10px; align-items: center; font: 600 16px var(--font-ui); }
+.vs-empty { flex: 1; display: grid; place-items: center; font: 600 30px var(--font-script); color: var(--ink-500); }
+.hud-vs { position: absolute; right: 36px; bottom: 74px; font-size: 15px; }

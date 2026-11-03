@@ -132,7 +132,7 @@ function Play({ s }: { s: Session }) {
   const bg = { idle: 'var(--phone-bg)', serve: 'var(--sun-400)', between: 'var(--phone-bg)', flash: 'var(--cobalt-50)', smash: 'var(--p1)' }[mode];
   let hint = 'Double-tap to recalibrate';
   if (mode === 'serve') hint = 'Your serve';
-  if (mode === 'between') hint = `Next serve: ${st.nextYou ? 'you' : 'Marlo'}`;
+  if (mode === 'between') hint = `Next serve: ${st.nextYou ? 'you' : st.op}`;
   if (st.ui === 'lobby') hint = st.displayUp ? 'Tap to play · double-tap to recalibrate' : 'Waiting for the laptop…';
   if (mode === 'flash') hint = '';
 

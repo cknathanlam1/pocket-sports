@@ -1,14 +1,17 @@
 // Rooms: one display + one phone per 4-letter code. Handles create/resume/join, forwards WebRTC
 // signaling and relays peer messages when P2P is unavailable. Transport-agnostic (tests use fakes).
 import { ROOM_ALPHABET, ROOM_CODE_LENGTH, ROOM_IDLE_EXPIRY_MS } from '../shared/constants.ts';
-import type { ClientMsg, Role, ServerMsg } from '../shared/protocol.ts';
+import type { ClientMsg, Role, RoomKind, ServerMsg } from '../shared/protocol.ts';
 
 export interface Sock {
   send(data: string): void;
   close(): void;
 }
 
+// A 'match' room joins two laptops for an online game: the host sits in the display slot and the guest
+// in the phone slot, so signaling and relay work unchanged. Codes can't be joined across kinds.
 interface Room {
+  kind: RoomKind;
   code: string;
   token: string; // lets the display reclaim the room
   display: Sock | null;
@@ -68,7 +71,7 @@ export class Rooms {
         return this.send(s, { k: 'echo', t0: msg.t0, t1: this.now() });
       case 'create': {
         this.leave(s, sess);
-        const room: Room = { code: this.newCode(), token: this.newToken(), display: s, phone: null, pid: null, lastActive: this.now() };
+        const room: Room = { kind: msg.kind === 'match' ? 'match' : 'pair', code: this.newCode(), token: this.newToken(), display: s, phone: null, pid: null, lastActive: this.now() };
         this.rooms.set(room.code, room);
         sess.role = 'display';
         sess.room = room;
@@ -79,7 +82,7 @@ export class Rooms {
         // After a server restart (redeploy, free-tier spin-down) rooms are gone. Re-create the display's
         // room under the same code so the phone's rejoin still lands, as long as nobody took the code.
         if (!this.rooms.has(code) && this.validCode(code) && typeof msg.token === 'string' && msg.token.length >= 16) {
-          this.rooms.set(code, { code, token: msg.token, display: null, phone: null, pid: null, lastActive: this.now() });
+          this.rooms.set(code, { kind: msg.kind === 'match' ? 'match' : 'pair', code, token: msg.token, display: null, phone: null, pid: null, lastActive: this.now() });
         }
         const room = this.rooms.get(code);
         if (!room) return this.send(s, { k: 'err', e: 'room-not-found' });
@@ -99,7 +102,9 @@ export class Rooms {
       }
       case 'join': {
         const room = this.rooms.get(String(msg.code).toUpperCase());
-        if (!room) return this.send(s, { k: 'err', e: 'room-not-found' });
+        if (!room || room.kind !== (msg.kind === 'match' ? 'match' : 'pair')) return this.send(s, { k: 'err', e: 'room-not-found' });
+        // A match has one guest seat: a second person can't take it, but the same tab (pid) can rejoin.
+        if (room.kind === 'match' && room.phone && room.pid !== String(msg.pid)) return this.send(s, { k: 'err', e: 'room-full' });
         this.leave(s, sess);
         // Latest phone wins: a rejoin (or a zombie socket) is replaced.
         if (room.phone && room.phone !== s) this.drop(room.phone, 'replaced');

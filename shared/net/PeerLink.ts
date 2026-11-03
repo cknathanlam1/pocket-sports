@@ -1,16 +1,13 @@
-// Phone ↔ laptop link. Relay through the server WebSocket is first-class: it carries traffic from
+// Peer link (phone ↔ laptop, or laptop ↔ laptop in an online match). Relay through the server WebSocket is first-class: it carries traffic from
 // the moment the peer is present. WebRTC is negotiated in parallel and takes over once both data
 // channels open (lossy channel: unordered, maxRetransmits 0; reliable channel: ordered). If P2P
 // isn't up within `p2pTimeoutMs` we report relay and stop waiting, but still upgrade if it connects.
-import { type DisplayMsg, LOSSY_KINDS, type PhoneMsg, type Role, type ServerMsg, type Signal } from '../protocol.ts';
+import { LOSSY_KINDS, type PeerMsg, type ServerMsg, type Signal } from '../protocol.ts';
 import type { ServerConn } from './ServerConn.ts';
 
 export type TransportKind = 'p2p' | 'relay' | 'none';
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
-
-type Out<R extends Role> = R extends 'display' ? DisplayMsg : PhoneMsg;
-type In<R extends Role> = R extends 'display' ? PhoneMsg : DisplayMsg;
 
 export interface LinkStatus {
   transport: TransportKind;
@@ -18,7 +15,8 @@ export interface LinkStatus {
   p2pFailed: boolean;
 }
 
-export class PeerLink<R extends Role> {
+/** Out/In: message types this end sends and receives. The offerer (laptop, or match host) starts WebRTC. */
+export class PeerLink<Out extends PeerMsg, In extends PeerMsg> {
   private pc: RTCPeerConnection | null = null;
   private lossy: RTCDataChannel | null = null;
   private reliable: RTCDataChannel | null = null;
@@ -26,18 +24,18 @@ export class PeerLink<R extends Role> {
   private peerUp = false;
   private p2pFailed = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private msgHandlers = new Set<(m: In<R>) => void>();
+  private msgHandlers = new Set<(m: In) => void>();
   private statusHandlers = new Set<(s: LinkStatus) => void>();
   private lastStatus = '';
-  private readonly role: R;
+  private readonly offerer: boolean;
   private readonly conn: ServerConn;
   private readonly p2pTimeoutMs: number;
   /** Disable WebRTC entirely (forced relay, for testing the fallback path). */
   forceRelay = false;
 
-  constructor(conn: ServerConn, role: R, p2pTimeoutMs = 3000) {
+  constructor(conn: ServerConn, offerer: boolean, p2pTimeoutMs = 3000) {
     this.conn = conn;
-    this.role = role;
+    this.offerer = offerer;
     this.p2pTimeoutMs = p2pTimeoutMs;
     conn.on((m) => this.onServer(m));
     if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('relay')) this.forceRelay = true;
@@ -56,7 +54,7 @@ export class PeerLink<R extends Role> {
     return this.lossy?.readyState === 'open' && this.reliable?.readyState === 'open';
   }
 
-  send(m: Out<R>): void {
+  send(m: Out): void {
     const s = JSON.stringify(m);
     if (this.p2pOpen) {
       const ch = LOSSY_KINDS.has(m.k) ? this.lossy! : this.reliable!;
@@ -68,7 +66,7 @@ export class PeerLink<R extends Role> {
     if (this.peerUp) this.conn.send({ k: 'relay', m });
   }
 
-  onMessage(h: (m: In<R>) => void): () => void {
+  onMessage(h: (m: In) => void): () => void {
     this.msgHandlers.add(h);
     return () => this.msgHandlers.delete(h);
   }
@@ -87,10 +85,10 @@ export class PeerLink<R extends Role> {
     for (const h of this.statusHandlers) h(s);
   }
 
-  private deliver(raw: string | In<R>): void {
-    let m: In<R>;
+  private deliver(raw: string | In): void {
+    let m: In;
     try {
-      m = typeof raw === 'string' ? (JSON.parse(raw) as In<R>) : raw;
+      m = typeof raw === 'string' ? (JSON.parse(raw) as In) : raw;
     } catch {
       return;
     }
@@ -102,10 +100,10 @@ export class PeerLink<R extends Role> {
       const was = this.peerUp;
       this.peerUp = m.up;
       // (Re)negotiate when the peer appears and P2P isn't already carrying traffic.
-      if (m.up && (!was || !this.p2pOpen) && this.role === 'display') this.startOffer();
+      if (m.up && (!was || !this.p2pOpen) && this.offerer) this.startOffer();
       this.emitStatus();
     } else if (m.k === 'relay') {
-      this.deliver(m.m as In<R>);
+      this.deliver(m.m as In);
     } else if (m.k === 'sig') {
       void this.onSignal(m.d);
     }

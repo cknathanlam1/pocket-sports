@@ -10,11 +10,16 @@ import { Paused, Results, ServerBanner, Toast } from './screens/Overlays.tsx';
 import { Pairing, Title } from './screens/Pairing.tsx';
 import { PracticeHud } from './screens/Practice.tsx';
 import { Tutorial } from './screens/Tutorial.tsx';
+import { Lobby } from './screens/Versus.tsx';
 
 export function App({ rt }: { rt: Runtime }) {
   const { screen, devOpen, mode } = useUi();
   const leaveTitle = useCallback(() => {
-    if (store.get().screen === 'title') rt.go(store.get().phone.phone === 'calibrated' ? 'menu' : 'pairing');
+    if (store.get().screen !== 'title') return;
+    // An invite link (/?vs=CODE) goes straight to the online lobby; pair a phone from there if wanted.
+    const code = new URLSearchParams(location.search).get('vs');
+    if (code && /^[A-Za-z]{4}$/.test(code)) rt.openVersus(code.toUpperCase());
+    else rt.go(store.get().phone.phone === 'calibrated' ? 'menu' : 'pairing');
   }, [rt]);
   return (
     <>
@@ -25,6 +30,7 @@ export function App({ rt }: { rt: Runtime }) {
       {screen === 'calibrate' && <Calibrate rt={rt} />}
       {screen === 'menu' && <Menu rt={rt} />}
       {screen === 'setup' && <Setup rt={rt} />}
+      {screen === 'lobby' && <Lobby rt={rt} />}
       {screen === 'customize' && <Customize rt={rt} />}
       {screen === 'paused' && <Paused rt={rt} />}
       {screen === 'matchOver' && <Results rt={rt} />}

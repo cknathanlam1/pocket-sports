@@ -2,7 +2,7 @@
 // phone, pong replies for clock sync, and the PhoneInput fed by the link.
 import { PeerLink, type TransportKind } from '../../shared/net/PeerLink.ts';
 import { ServerConn } from '../../shared/net/ServerConn.ts';
-import type { DisplayMsg } from '../../shared/protocol.ts';
+import type { DisplayMsg, PhoneMsg } from '../../shared/protocol.ts';
 import { PhoneInput } from '../input/PhoneInput.ts';
 
 export type PhoneState = 'none' | 'connected' | 'calibrated';
@@ -21,7 +21,7 @@ const ROOM_KEY = 'pocket-sports.room';
 export class PhoneHost {
   readonly input = new PhoneInput();
   private conn = new ServerConn();
-  private link = new PeerLink(this.conn, 'display');
+  private link = new PeerLink<DisplayMsg, PhoneMsg>(this.conn, true);
   private listeners = new Set<(s: PhoneStatus) => void>();
   status: PhoneStatus = { serverUp: false, code: null, url: null, transport: 'none', phone: 'none', rtt: null };
 

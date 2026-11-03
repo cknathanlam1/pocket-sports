@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { ClockSync } from '../shared/clock.ts';
 import { PeerLink, type TransportKind } from '../shared/net/PeerLink.ts';
 import { ServerConn } from '../shared/net/ServerConn.ts';
-import type { HitTier, MenuMirror, PhoneMsg, Quat, UiState } from '../shared/protocol.ts';
+import type { DisplayMsg, HitTier, MenuMirror, PhoneMsg, Quat, UiState } from '../shared/protocol.ts';
 import { defaultConfig } from '../engine/config.ts';
 import { type DetectedSwing, MotionPipeline, type RawEvent } from './motion.ts';
 import { Recorder } from './recorder.ts';
@@ -24,6 +24,8 @@ export interface PhoneState {
   score: [number, number] | null;
   lastPoint: 'won' | 'lost' | 'let' | null;
   nextYou: boolean;
+  /** Opponent's name (Marlo, or the online friend). */
+  op: string;
   /** Was connected to the laptop at least once (so a drop shows Reconnecting, not Joining). */
   wasLinked: boolean;
   /** Dev mode (?dev): recorder state and the last detected swing. */
@@ -52,7 +54,7 @@ export class PhoneSession {
   private state: PhoneState;
   private listeners = new Set<() => void>();
   private conn = new ServerConn();
-  private link = new PeerLink(this.conn, 'phone');
+  private link = new PeerLink<PhoneMsg, DisplayMsg>(this.conn, false);
   private clock: ClockSync;
   private q: Quat | null = null;
   private q0: Quat | null = null;
@@ -63,7 +65,7 @@ export class PhoneSession {
   private stopWatch: (() => void) | null = null;
 
   constructor(room: string) {
-    this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null, score: null, lastPoint: null, nextYou: false, wasLinked: false, dev: new URLSearchParams(location.search).has('dev'), recording: false, recCount: { events: 0, swings: 0 }, lastSwing: null, axisLocked: false, menu: null };
+    this.state = { step: 'connecting', room, transport: 'none', displayUp: false, rtt: null, ui: 'lobby', motionError: null, flash: null, score: null, lastPoint: null, nextYou: false, op: 'Marlo', wasLinked: false, dev: new URLSearchParams(location.search).has('dev'), recording: false, recCount: { events: 0, swings: 0 }, lastSwing: null, axisLocked: false, menu: null };
     const pid = phoneId();
 
     // A not-found right after a server restart usually means the laptop hasn't re-created the room yet,
@@ -116,7 +118,7 @@ export class PhoneSession {
     this.link.onMessage((m) => {
       if (m.k === 'pong') this.clock.onPong(m.t0, m.t1, m.t2);
       else if (m.k === 'cfg') this.pipe.detector.params = { ...m.swing };
-      else if (m.k === 'st') this.set({ ui: m.s, score: m.sc ?? null, lastPoint: m.pt ?? null, nextYou: !!m.nx, menu: m.menu ?? null });
+      else if (m.k === 'st') this.set({ ui: m.s, score: m.sc ?? null, lastPoint: m.pt ?? null, nextYou: !!m.nx, menu: m.menu ?? null, op: m.op ?? 'Marlo' });
       else if (m.k === 'hit') {
         const tier = m.tier ?? 'nice';
         vibrate(tier === 'smash' ? [40, 30, 40] : tier === 'great' ? 25 : 10);

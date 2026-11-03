@@ -5,12 +5,13 @@ import type { MachineSettings, Phase, PracticeResult } from '../engine/game.ts';
 import type { Side } from '../engine/physics.ts';
 import type { BestOf } from '../engine/rules.ts';
 import type { TimingClass } from '../engine/shot.ts';
-import { type Look, P1_LOOK } from '../shared/art/Char.tsx';
+import { type Look, MARLO_LOOK, P1_LOOK } from '../shared/art/Char.tsx';
 import type { HitTier } from '../shared/protocol.ts';
 import type { PhoneStatus } from './net/PhoneHost.ts';
+import type { VsStatus } from './net/VersusLink.ts';
 
 /** Laptop screens, named after the design ids (design/SPEC.md). */
-export type Screen = 'title' | 'pairing' | 'calibrate' | 'tutorial' | 'menu' | 'customize' | 'setup' | 'playing' | 'paused' | 'matchOver';
+export type Screen = 'title' | 'pairing' | 'calibrate' | 'tutorial' | 'menu' | 'customize' | 'setup' | 'lobby' | 'playing' | 'paused' | 'matchOver';
 
 export interface MenuSettings {
   cpuLevel: CpuLevel;
@@ -62,12 +63,19 @@ export interface UiState {
   phone: PhoneStatus;
   /** The current match is controlled by the phone (pause if it drops). */
   usingPhone: boolean;
-  pauseReason: 'user' | 'phone' | null;
+  /** user: you paused. phone: your phone dropped. remote: your opponent paused. opponent: their laptop dropped. */
+  pauseReason: 'user' | 'phone' | 'remote' | 'opponent' | null;
   settingsOpen: boolean;
   devOpen: boolean;
   toast: { key: number; text: string; icon: string; tone: 'info' | 'ok' | 'warn' } | null;
-  /** 'practice' = ball machine on the far side, no score. */
-  mode: 'match' | 'practice';
+  /** 'practice' = ball machine on the far side, no score. 'versus' = online match against another laptop. */
+  mode: 'match' | 'practice' | 'versus';
+  /** Online match link (lobby + match), null when not in one. */
+  vs: VsStatus | null;
+  /** Who's on the far side: Marlo (CPU) or your online opponent. */
+  opponent: { name: string; look: Look };
+  /** Your display name for online matches. */
+  name: string;
   machine: MachineSettings;
   practice: { streak: number; best: number; good: number; total: number; last: { key: number; result: PracticeResult } | null };
   audio: { volume: number; muted: boolean };
@@ -79,6 +87,9 @@ const LOOK_KEY = 'pocket-sports.look';
 const MACHINE_KEY = 'pocket-sports.machine';
 const AUDIO_KEY = 'pocket-sports.audio';
 const TUTORIAL_KEY = 'pocket-sports.tutorialDone';
+const NAME_KEY = 'pocket-sports.name';
+
+export const MARLO = { name: 'Marlo', look: MARLO_LOOK };
 
 function load<T>(key: string, d: T): T {
   try {
@@ -117,6 +128,9 @@ let state: UiState = {
   devOpen: false,
   toast: null,
   mode: 'match',
+  vs: null,
+  opponent: MARLO,
+  name: load<{ name: string }>(NAME_KEY, { name: 'Player' }).name,
   machine: load<MachineSettings>(MACHINE_KEY, { speed: 6, spin: 'none', placement: 'middle', intervalMs: 900 }),
   practice: { streak: 0, best: 0, good: 0, total: 0, last: null },
   audio: load(AUDIO_KEY, { volume: 0.8, muted: false }),
@@ -134,6 +148,7 @@ export const store = {
     if (patch.machine) save(MACHINE_KEY, patch.machine);
     if (patch.audio) save(AUDIO_KEY, patch.audio);
     if (patch.tutorialDone !== undefined) save(TUTORIAL_KEY, { done: patch.tutorialDone });
+    if (patch.name !== undefined) save(NAME_KEY, { name: patch.name });
     for (const l of listeners) l();
   },
   subscribe(fn: () => void): () => void {

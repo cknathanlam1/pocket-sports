@@ -2,18 +2,19 @@
 // the screen flow (pairing → calibrate → menu → setup → match → results).
 import * as THREE from 'three';
 import { Game, type GameEvent, type MachineSettings } from '../engine/game.ts';
+import { applyNet, encodeNet, mirrorScore } from '../engine/net.ts';
 import { HALF_W, type Side, other } from '../engine/physics.ts';
 import type { PointReason } from '../engine/referee.ts';
-import { gamesToWin } from '../engine/rules.ts';
-import { MARLO_LOOK } from '../shared/art/Char.tsx';
-import type { HitTier, MenuMirror, UiState } from '../shared/protocol.ts';
+import { type BestOf, type Score, gamesToWin } from '../engine/rules.ts';
+import type { HitTier, MenuMirror, Quat, UiState, VersusMsg } from '../shared/protocol.ts';
 import { sfx } from './audio/Sfx.ts';
 import { loadConfig } from './devConfig.ts';
 import { MouseInput } from './input/MouseInput.ts';
 import type { PaddleInput, Swing } from './input/PaddleInput.ts';
 import { PhoneHost } from './net/PhoneHost.ts';
+import { VersusLink, type VsStatus } from './net/VersusLink.ts';
 import { World } from './scene/World.ts';
-import { type Banner, type MenuSettings, type Screen, emptyStats, store } from './store.ts';
+import { type Banner, MARLO, type MenuSettings, type Screen, emptyStats, store } from './store.ts';
 
 const LOST_REASON: Record<PointReason, string> = {
   out: 'Just out',
@@ -56,6 +57,13 @@ export class Runtime {
   private weakWarned = false;
   /** Tutorial screen listens to swings instead of the game. */
   private swingTap: ((s: Swing) => void) | null = null;
+  /** Online match link (lobby + match). */
+  vs: VersusLink | null = null;
+  private vsSig = '';
+  /** Opponent's paddle orientation (their frame) and when it arrived. */
+  private farQ: Quat | null = null;
+  private farQAt = 0;
+  private lastPq = 0;
   /** Adaptive resolution: current pixel ratio and a frame-time window. */
   private pixelRatio = 1;
   private perfFrames = 0;
@@ -80,6 +88,7 @@ export class Runtime {
     this.applyLooks();
     store.subscribe(() => {
       this.applyLooks();
+      this.introduce();
       const a = store.get().audio;
       sfx.setVolume(a.volume, a.muted);
     });
@@ -103,7 +112,7 @@ export class Runtime {
       } else if (act.a === 'play' && screen === 'menu') this.go('setup');
       else if (act.a === 'back' && screen === 'setup') this.go('menu');
       else if (act.a === 'start' && screen === 'setup') this.startMatch(settings);
-      else if (act.a === 'rematch' && screen === 'matchOver') this.startMatch(settings);
+      else if (act.a === 'rematch' && screen === 'matchOver') this.rematch();
       else if (act.a === 'menu' && screen === 'matchOver') this.quitToMenu();
       else if (act.a === 'practice' && screen === 'menu') this.startPractice();
     });
@@ -138,7 +147,7 @@ export class Runtime {
         if (store.get().screen === 'pairing' && this.host.status.phone === 'connected') this.go('calibrate');
       }, 1400);
     }
-    if (s.phone === 'calibrated' && (screen === 'pairing' || screen === 'calibrate' || screen === 'title')) this.go(store.get().tutorialDone ? 'menu' : 'tutorial');
+    if (s.phone === 'calibrated' && (screen === 'pairing' || screen === 'calibrate' || screen === 'title')) this.go(this.vs ? 'lobby' : store.get().tutorialDone ? 'menu' : 'tutorial');
     // Our room expired (or another tab took it) and a fresh code replaced it: the phone must rescan.
     if (prev.code && s.code && prev.code !== s.code) store.toast(`Room expired: new code ${s.code}. Rescan on your phone.`, '!', 'warn');
     if (prev.transport === 'none' && s.transport !== 'none') sfx.connect();
@@ -183,6 +192,7 @@ export class Runtime {
     if (this.swingTap) return this.swingTap(s);
     if (this.attract || store.get().screen !== 'playing') return;
     const r = this.game.swing(0, (performance.now() - s.t) / 1000, s);
+    this.flushNet();
     if (r.result !== 'none' && r.offsetMs !== undefined)
       store.set({ timing: { key: ++this.key, offsetMs: r.offsetMs, timing: r.timing ?? 'miss', hit: r.result === 'hit' } });
   }
@@ -192,11 +202,14 @@ export class Runtime {
     const { screen, settings } = store.get();
     if (screen === 'playing') {
       this.game.toss(0);
+      this.flushNet();
       return;
     }
     if (!fromPhone || !this.phoneReady) return;
-    if (screen === 'menu') this.go('setup');
-    else if (screen === 'setup' || screen === 'matchOver') this.startMatch(settings);
+    if (screen === 'lobby' && this.vs?.status.role === 'host' && this.vs.connected) this.hostStartVersus(store.get().settings.bestOf);
+    else if (screen === 'menu') this.go('setup');
+    else if (screen === 'setup') this.startMatch(settings);
+    else if (screen === 'matchOver') this.rematch();
     else if (screen === 'paused') this.resume();
   }
 
@@ -205,10 +218,11 @@ export class Runtime {
   }
 
   private applyLooks(): void {
-    this.world.setLooks(this.attract ? { ...store.get().look, outfit: '#2F6FDB' } : store.get().look, MARLO_LOOK);
+    this.world.setLooks(this.attract ? { ...store.get().look, outfit: '#2F6FDB' } : store.get().look, store.get().opponent.look);
   }
 
   startMatch(s: MenuSettings): void {
+    if (this.vs) this.closeVersus();
     store.set({
       settings: s,
       screen: 'playing',
@@ -235,6 +249,7 @@ export class Runtime {
 
   /** Practice: ball machine on the far side, live-adjustable, no score. */
   startPractice(): void {
+    if (this.vs) this.closeVersus();
     const { settings, machine } = store.get();
     store.set({
       screen: 'playing',
@@ -263,17 +278,27 @@ export class Runtime {
     if (this.game.isPractice) Object.assign(this.game.machine, machine);
   }
 
-  pause(reason: 'user' | 'phone'): void {
+  pause(reason: 'user' | 'phone' | 'remote' | 'opponent'): void {
     if (store.get().screen !== 'playing') return;
     store.set({ screen: 'paused', pauseReason: reason });
+    // Online: pause both laptops (unless the other side is the one that paused or dropped).
+    if (this.isVersus && (reason === 'user' || reason === 'phone')) this.vs?.send({ k: 'vpz', on: true, why: reason });
   }
 
-  resume(): void {
+  /** fromRemote: the opponent resumed. Online, the rally in progress is replayed from the serve on both laptops. */
+  resume(fromRemote = false): void {
+    if (store.get().screen !== 'paused') return;
+    if (this.isVersus) {
+      if (!this.vs?.connected) return; // can't resume without the opponent
+      if (!fromRemote) this.vs.send({ k: 'vpz', on: false });
+      this.game.replayPoint();
+    }
     this.last = performance.now();
     store.set({ screen: 'playing', pauseReason: null, usingPhone: store.get().usingPhone || this.phoneReady });
   }
 
   quitToMenu(): void {
+    if (this.isVersus) return this.leaveVersusMatch();
     this.attract = true;
     this.game = this.newAttractGame();
     store.set({ screen: 'menu', mode: 'match', hud: null, banner: null, timing: null, hitFx: null, celebrate: null, usingPhone: false, pauseReason: null, matchPoint: null });
@@ -299,7 +324,8 @@ export class Runtime {
     }
     // The near paddle mirrors the phone whenever one is calibrated (even on the menu, as live feedback).
     const q = this.phoneReady ? this.host.input.orientation() : this.attract ? null : this.mouse.orientation();
-    this.world.sync(this.game, q, dt);
+    if (this.isVersus) this.versusFrame(now, q);
+    this.world.sync(this.game, q, dt, this.farQ && now - this.farQAt < 500 ? this.farQ : null);
     if (!Runtime.OPAQUE.has(screen)) {
       this.renderer.render(this.world.scene, this.world.camera);
       this.adaptResolution(dt);
@@ -356,7 +382,7 @@ export class Runtime {
             ...(screen === 'matchOver' && ui.hud ? { won: ui.winner === 0, games: ui.hud.games } : {}),
           }
         : undefined;
-    const msg = { k: 'st' as const, s, sc, pt: s === 'between' ? this.lastPoint : undefined, nx: g.server === 0, menu };
+    const msg = { k: 'st' as const, s, sc, pt: s === 'between' ? this.lastPoint : undefined, nx: g.server === 0, menu, op: this.opName };
     const sig = JSON.stringify(msg);
     if (sig === this.sentUi) return;
     this.sentUi = sig;
@@ -382,7 +408,7 @@ export class Runtime {
         this.banner({ kind: 'let', icon: '↺', text: 'Let', sub: 'Replay the serve' });
       } else if (e.type === 'game' && this.game.winner === null) {
         const [a, b] = this.game.score.history.at(-1) ?? [0, 0];
-        this.banner({ kind: 'game', icon: e.winner === 0 ? '✓' : '✕', text: e.winner === 0 ? 'Game!' : 'Game: Marlo', sub: `${a}–${b}` });
+        this.banner({ kind: 'game', icon: e.winner === 0 ? '✓' : '✕', text: e.winner === 0 ? 'Game!' : `Game: ${this.opName}`, sub: `${a}–${b}` });
       } else if (e.type === 'match') {
         store.set({ winner: e.winner });
         if (e.winner === 0) sfx.win();
@@ -424,7 +450,8 @@ export class Runtime {
     const tier = hitTier(kmh, e.offsetMs);
     const fx = TIER_FX[tier];
     this.world.spark(b.x, b.y, b.z, tier !== 'nice');
-    this.freezeUntil = performance.now() + fx.stopMs;
+    // Hit-stop freezes our sim; online that would put this laptop behind the other one, so skip it.
+    if (!this.isVersus) this.freezeUntil = performance.now() + fx.stopMs;
     if (fx.shake) this.world.shake(fx.shake, fx.hits);
     store.set({ hitFx: { key: ++this.key, tier, kmh } });
     this.host.send({ k: 'hit', strength: e.strength, tier, kmh, rally: this.game.rallyShots });
@@ -456,9 +483,200 @@ export class Runtime {
     if (deuce) sfx.deuce();
     else if (mp !== null) sfx.matchPoint();
     if (deuce) this.banner({ kind: 'deuce', icon: '=', text: 'Deuce', sub: 'Win two points in a row' });
-    else if (mp !== null) this.banner({ kind: 'matchpoint', icon: '★', text: mp === 0 ? 'Match point' : 'Match point: Marlo', sub: mp === 0 ? 'One point to win it all' : 'Hang in there' });
-    else if (won) this.banner({ kind: 'won', icon: '✓', text: 'Point!', sub: reason === 'missed return' || reason === 'double bounce' ? `Winner · ${kmh} km/h` : `Marlo: ${LOST_REASON[reason].toLowerCase()}` });
+    else if (mp !== null) this.banner({ kind: 'matchpoint', icon: '★', text: mp === 0 ? 'Match point' : `Match point: ${this.opName}`, sub: mp === 0 ? 'One point to win it all' : 'Hang in there' });
+    else if (won) this.banner({ kind: 'won', icon: '✓', text: 'Point!', sub: reason === 'missed return' || reason === 'double bounce' ? `Winner · ${kmh} km/h` : `${this.opName}: ${LOST_REASON[reason].toLowerCase()}` });
     else this.banner({ kind: 'lost', icon: '✕', text: 'Missed it', sub: LOST_REASON[reason] });
+  }
+
+  // ───────────────────────── Online match ─────────────────────────
+
+  get isVersus(): boolean {
+    return !this.attract && this.game.remoteSide !== null;
+  }
+
+  private get opName(): string {
+    return store.get().opponent.name;
+  }
+
+  /** Host (no code) or join (code) an online match and open the lobby. */
+  openVersus(code?: string): void {
+    this.vs?.close();
+    const vs = new VersusLink(code ? 'guest' : 'host', code);
+    this.vs = vs;
+    this.vsSig = '';
+    this.introduce();
+    vs.onStatus((s) => this.onVsStatus(s));
+    vs.onMessage((m) => this.onVsMsg(m));
+    if (this.isVersus) this.toAttract();
+    this.go('lobby');
+  }
+
+  /** Leave the lobby entirely (back to the menu, CPU opponent again). */
+  closeVersus(): void {
+    const vs = this.vs;
+    this.vs = null;
+    vs?.close();
+    if (this.isVersus) this.toAttract();
+    store.set({ vs: null, opponent: MARLO });
+    this.applyLooks();
+  }
+
+  /** Results screen: same settings again (online, only the host can restart). */
+  rematch(): void {
+    if (this.isVersus) this.hostStartVersus(store.get().settings.bestOf);
+    else this.startMatch(store.get().settings);
+  }
+
+  /** Host: start (or restart) the match for both laptops. */
+  hostStartVersus(bestOf: BestOf): void {
+    const vs = this.vs;
+    if (!vs || vs.status.role !== 'host' || !vs.connected) return;
+    const sv: Side = Math.random() < 0.5 ? 0 : 1;
+    vs.send({ k: 'vgo', bestOf, sv: other(sv) });
+    this.startVersus(bestOf, sv, true);
+  }
+
+  private startVersus(bestOf: BestOf, sv: Side, authority: boolean, score?: Score): void {
+    const settings = { ...store.get().settings, bestOf };
+    store.set({
+      settings,
+      screen: 'playing',
+      mode: 'versus',
+      banner: null,
+      timing: null,
+      hitFx: null,
+      celebrate: null,
+      winner: null,
+      matchPoint: null,
+      stats: [emptyStats(), emptyStats()],
+      usingPhone: this.phoneReady,
+      pauseReason: null,
+      settingsOpen: false,
+    });
+    this.attract = false;
+    this.lastPoint = undefined;
+    // Each player's own assist level applies to their own swings (judged on their laptop).
+    this.game = new Game({ ...settings, controllers: ['human', 'remote'], initialServer: sv, net: { authority } }, this.cfg);
+    if (score) this.restoreScore(score);
+    this.hudSig = '';
+    this.oohDone = false;
+    this.world.setPractice(false);
+    this.applyLooks();
+  }
+
+  private restoreScore(s: Score): void {
+    const sc = this.game.score;
+    sc.initialServer = s.initialServer;
+    sc.points = [...s.points];
+    sc.games = [...s.games];
+    sc.history = s.history.map((h) => [...h] as [number, number]);
+    this.game.setupServe();
+  }
+
+  /** Back to the lobby from a match (tells the opponent). */
+  leaveVersusMatch(): void {
+    if (this.isVersus) this.vs?.send({ k: 'vbye' });
+    this.toAttract();
+    this.go(this.vs ? 'lobby' : 'menu');
+  }
+
+  private toAttract(): void {
+    this.attract = true;
+    this.game = this.newAttractGame();
+    store.set({ mode: 'match', hud: null, banner: null, timing: null, hitFx: null, celebrate: null, usingPhone: false, pauseReason: null, matchPoint: null });
+    this.applyLooks();
+  }
+
+  /** Tell the opponent our name, look and whether we have a phone (only when it changes). */
+  private introduce(): void {
+    if (!this.vs) return;
+    const { name, look } = store.get();
+    const me = { name, look, phone: this.phoneReady };
+    const sig = JSON.stringify(me);
+    if (sig === this.vsSig) return;
+    this.vsSig = sig;
+    this.vs.introduce(me);
+  }
+
+  private onVsStatus(s: VsStatus): void {
+    const prev = store.get().vs;
+    store.set({ vs: s, opponent: s.opponent ? { name: s.opponent.name, look: s.opponent.look } : MARLO });
+    if (prev?.transport === 'none' && s.transport !== 'none') sfx.connect();
+    if (prev && prev.transport !== 'none' && s.transport === 'none') sfx.disconnect();
+    if (!this.isVersus) return;
+    const screen = store.get().screen;
+    if (s.transport === 'none' && screen === 'playing') this.pause('opponent');
+    // Back after a drop: the host re-sends the match with the current score (the guest may have reloaded
+    // into the lobby) and both replay the rally from the serve. The guest waits for that message.
+    if (s.transport !== 'none' && screen === 'paused' && store.get().pauseReason === 'opponent' && s.role === 'host') {
+      const g = this.game;
+      this.vs?.send({ k: 'vgo', bestOf: g.score.bestOf, sv: other(g.score.initialServer), score: mirrorScore(g.score) });
+      this.resume(true);
+    }
+  }
+
+  private onVsMsg(m: VersusMsg): void {
+    if (m.k === 'vgo') {
+      if (this.vs?.status.role !== 'guest') return;
+      // Rejoin of a match in progress: same game, continue from the host's score.
+      if (m.score && this.isVersus && store.get().screen === 'paused') {
+        this.restoreScore(m.score);
+        this.resume(true);
+      } else this.startVersus(m.bestOf, m.sv, false, m.score);
+      return;
+    }
+    if (m.k === 'vpq') {
+      this.farQ = m.q;
+      this.farQAt = performance.now();
+      return;
+    }
+    if (m.k === 'vbye') {
+      if (this.isVersus) {
+        store.toast(`${this.opName} left the match`, '!', 'warn');
+        this.leaveVersusMatch();
+      }
+      return;
+    }
+    if (!this.isVersus) return;
+    if (m.k === 'vpz') {
+      if (m.on) this.pause('remote');
+      else this.resume(true);
+      return;
+    }
+    if (m.k === 'vt' || m.k === 'vh' || m.k === 'vv') {
+      // game.simTime is as of the last frame; the message arrived since, so it is that much less old.
+      const sinceFrame = performance.now() - this.last;
+      const before = this.game.ball.p;
+      const bx = before.x;
+      const by = before.y;
+      const bz = before.z;
+      const ok = applyNet(m, this.game, Math.max(0, (this.vs?.oneWayMs ?? 40) - sinceFrame));
+      // The opponent's hit lands a one-way delay late, so the ball jumps forward along its new path.
+      // Ease the drawn ball from where it was instead of snapping.
+      if (ok && m.k === 'vh') {
+        const p = this.game.ball.p;
+        this.world.nudgeBall(bx - p.x, by - p.y, bz - p.z);
+      }
+    }
+  }
+
+  /** Per frame, online: latency-dependent grace, send queued events and our paddle orientation. */
+  private versusFrame(now: number, q: Quat | null): void {
+    const vs = this.vs;
+    if (!vs) return;
+    // Hold a ruling long enough for the opponent's hit to cross the network: RTT plus their phone's delay.
+    this.game.netGraceMs = (vs.status.rtt ?? 160) + 150;
+    this.flushNet();
+    if (q && now - this.lastPq > 33) {
+      this.lastPq = now;
+      vs.send({ k: 'vpq', q });
+    }
+  }
+
+  /** Send the game's outgoing events right away (also called straight after a swing or toss). */
+  private flushNet(): void {
+    if (!this.vs || !this.isVersus) return;
+    for (const o of this.game.drainNet()) this.vs.send(encodeNet(o, this.game));
   }
 
   /** The side one point from winning the match, if any. */

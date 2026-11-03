@@ -118,6 +118,8 @@ export class World {
   private hist = Array.from({ length: GHOSTS * 2 + 1 }, () => new THREE.Vector3());
   private histHead = 0;
   private histCount = 0;
+  /** Online: decaying draw offset for the ball (see nudgeBall). */
+  private ballOffset = new THREE.Vector3();
   private avatars: [Avatar, Avatar];
   private camPos = new THREE.Vector3(0, 2.2, HALF_L + 2.6);
   private camLook = new THREE.Vector3(0, TABLE_TOP, -0.5);
@@ -527,11 +529,23 @@ export class World {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Copy engine state into the scene. `humanQ` is the near player's paddle orientation from input. */
-  sync(game: Game, humanQ: Quat | null, dt: number): void {
+  /** Online: draw the ball offset by (dx, dy, dz) from its true position, easing to zero (hides the latency jump). */
+  nudgeBall(dx: number, dy: number, dz: number): void {
+    // Only small corrections are worth easing; a big jump (new point, rewind) should just snap.
+    if (Math.hypot(dx, dy, dz) > 1.2) return;
+    this.ballOffset.set(this.ballOffset.x + dx, this.ballOffset.y + dy, this.ballOffset.z + dz);
+  }
+
+  /**
+   * Copy engine state into the scene. `humanQ` is the near player's paddle orientation from input;
+   * `farQ` the far player's (online opponent), relative to their own calibration.
+   */
+  sync(game: Game, humanQ: Quat | null, dt: number, farQ: Quat | null = null): void {
     this.clock += dt;
+    this.ballOffset.multiplyScalar(Math.exp(-dt / 0.07));
     const b = game.ball.p;
-    this.ball.position.set(b.x, b.y, b.z);
+    const o = this.ballOffset;
+    this.ball.position.set(b.x + o.x, b.y + o.y, b.z + o.z);
     const overTable = Math.abs(b.x) <= HALF_W && Math.abs(b.z) <= HALF_L && b.y >= TABLE_TOP;
     const groundY = overTable ? TABLE_TOP + 0.001 : 0.004;
     const h = Math.max(b.y - BALL_R - groundY, 0);
@@ -554,7 +568,7 @@ export class World {
     }
 
     this.syncAvatar(game, 0, humanQ);
-    this.syncAvatar(game, 1, null);
+    this.syncAvatar(game, 1, farQ);
     this.updateFx(dt);
     for (let i = 0; i < this.palms.length; i++) this.palms[i]!.rotation.x = Math.sin(this.clock * 0.8 + i) * 0.02;
     this.updateCamera(game, dt);

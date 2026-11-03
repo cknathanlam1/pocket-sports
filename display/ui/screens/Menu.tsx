@@ -20,6 +20,7 @@ export function Menu({ rt }: { rt: Runtime }) {
   const { settings, settingsOpen, phone } = useUi();
   const items = [
     { t: 'Play vs CPU', s: `Best of ${settings.bestOf}`, ic: '▶', primary: true, on: () => rt.go('setup') },
+    { t: 'Play a friend', s: 'Online', ic: '⇄', on: () => rt.openVersus() },
     { t: 'Practice', s: 'Ball machine', ic: '○', on: () => rt.startPractice() },
     { t: 'Customize', s: 'Look & outfit', ic: '☺', on: () => rt.go('customize') },
     { t: 'Settings', s: 'Sound · Assist', ic: '⚙', on: () => store.set({ settingsOpen: true }) },
