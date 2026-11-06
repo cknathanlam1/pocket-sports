@@ -54,7 +54,12 @@ code (no install) and becomes a motion-controlled paddle. Built milestone by mil
 - `display/audio/Sfx.ts`: Web Audio, fully procedural (oscillators + filtered noise, no sample files). The context unlocks on the first click/key.
   Sounds follow design/SPEC.md: hit layers by speed (tock/tick/crack, pitch rises with power), bounce "pok" panned by ball x, net thud/tick, ball machine,
   crowd ambience + claps on a won point + "ooh" at rally 8 + cheer on a win, marimba UI blips (any `#ui button`), connect/disconnect two-notes, deuce drumroll, match-point pulse, win jingle.
-  Volume/mute live in Settings (`store.audio`, persisted).
+  Added later: swing whoosh (pitch/loudness by swing speed, on hits and misses), serve toss flick, deck bounce (once per point), "your serve" bell, game won/lost stingers,
+  a soft "wah-wah" for a lost match, pause/resume blips.
+- `display/audio/Music.ts`: procedural soundtrack (step sequencer with lookahead scheduling; marimba, steel pan, bass, pads, kick/rim/shaker). Tracks: menu (F major, 100 BPM, steel melody),
+  match (B♭, 112 BPM, sparse offbeat stabs; ducked to 50% while the ball is live; busier hats/kick + steel riff at match point or deuce), win (bright, with melody), lose (D minor, slow, no drums).
+  `runtime.syncMusic()` picks the track from the screen (crossfade ~0.8 s); paused muffles it through a lowpass. Audio suspends while the tab is hidden.
+- Mix: effects bus (`audio.volume`) + music bus (`audio.music`, ×1.4) → master (mute). Settings has Effects and Music sliders (persisted).
 - Practice (`Game` with `mode: 'practice'`, controllers `['human', 'machine']`): the machine feeds rally balls from the far end (speed, spin none/top/back/side/mix,
   placement BH/Mid/FH/random, pace). Feeds count as rally balls, not serves. No score: `practice` events give a good/miss/out/net result plus streak and best.
   `ui/screens/Practice.tsx` has the streak card and live machine controls (`rt.setMachine`, persisted). Start it from the laptop menu or the phone menu.

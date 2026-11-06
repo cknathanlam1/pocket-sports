@@ -78,7 +78,8 @@ export interface UiState {
   name: string;
   machine: MachineSettings;
   practice: { streak: number; best: number; good: number; total: number; last: { key: number; result: PracticeResult } | null };
-  audio: { volume: number; muted: boolean };
+  /** volume = effects, music = soundtrack (0–1). */
+  audio: { volume: number; muted: boolean; music: number };
   tutorialDone: boolean;
 }
 
@@ -133,7 +134,7 @@ let state: UiState = {
   name: load<{ name: string }>(NAME_KEY, { name: 'Player' }).name,
   machine: load<MachineSettings>(MACHINE_KEY, { speed: 6, spin: 'none', placement: 'middle', intervalMs: 900 }),
   practice: { streak: 0, best: 0, good: 0, total: 0, last: null },
-  audio: load(AUDIO_KEY, { volume: 0.8, muted: false }),
+  audio: load(AUDIO_KEY, { volume: 0.8, muted: false, music: 0.5 }),
   tutorialDone: load<{ done: boolean }>(TUTORIAL_KEY, { done: false }).done,
 };
 const listeners = new Set<() => void>();

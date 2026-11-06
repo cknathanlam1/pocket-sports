@@ -57,6 +57,9 @@ export class Runtime {
   private weakWarned = false;
   /** Tutorial screen listens to swings instead of the game. */
   private swingTap: ((s: Swing) => void) | null = null;
+  /** The ball already hit the deck this point (one floor sound per point). */
+  private floorPlayed = false;
+  private prevPhase = '';
   /** Online match link (lobby + match). */
   vs: VersusLink | null = null;
   private vsSig = '';
@@ -90,9 +93,12 @@ export class Runtime {
       this.applyLooks();
       this.introduce();
       const a = store.get().audio;
-      sfx.setVolume(a.volume, a.muted);
+      sfx.setVolume(a.volume, a.muted, a.music);
+      this.syncMusic();
     });
-    sfx.setVolume(store.get().audio.volume, store.get().audio.muted);
+    const a0 = store.get().audio;
+    sfx.setVolume(a0.volume, a0.muted, a0.music);
+    this.syncMusic();
 
     // Both input sources stay live: the mouse is the dev/fallback swing source while phone swings land in M3.
     for (const input of [this.mouse, this.host.input] as PaddleInput[]) {
@@ -161,6 +167,15 @@ export class Runtime {
     if (store.get().usingPhone && s.phone !== 'calibrated' && store.get().screen === 'playing') this.pause('phone');
   }
 
+  /** Soundtrack follows the screen: menus → menu, match (and practice) → match, results → win or lose. */
+  private syncMusic(): void {
+    const { screen, winner } = store.get();
+    const inGame = screen === 'playing' || screen === 'paused';
+    sfx.playMusic(inGame ? 'match' : screen === 'matchOver' ? (winner === 0 ? 'win' : 'lose') : 'menu');
+    sfx.muffleMusic(screen === 'paused');
+    if (!inGame) sfx.musicIntensity(false);
+  }
+
   /** Send the swing-detector tuning to the phone (it runs detection locally). */
   pushSwingConfig(): void {
     this.host.send({ k: 'cfg', swing: { ...this.cfg.swing } });
@@ -189,6 +204,8 @@ export class Runtime {
   }
 
   private onSwing(s: Swing): void {
+    const screen = store.get().screen;
+    if (screen === 'playing' || screen === 'tutorial') sfx.swing(s.peak);
     if (this.swingTap) return this.swingTap(s);
     if (this.attract || store.get().screen !== 'playing') return;
     const r = this.game.swing(0, (performance.now() - s.t) / 1000, s);
@@ -280,6 +297,7 @@ export class Runtime {
 
   pause(reason: 'user' | 'phone' | 'remote' | 'opponent'): void {
     if (store.get().screen !== 'playing') return;
+    sfx.pause();
     store.set({ screen: 'paused', pauseReason: reason });
     // Online: pause both laptops (unless the other side is the one that paused or dropped).
     if (this.isVersus && (reason === 'user' || reason === 'phone')) this.vs?.send({ k: 'vpz', on: true, why: reason });
@@ -294,6 +312,7 @@ export class Runtime {
       this.game.replayPoint();
     }
     this.last = performance.now();
+    sfx.resume();
     store.set({ screen: 'playing', pauseReason: null, usingPhone: store.get().usingPhone || this.phoneReady });
   }
 
@@ -331,6 +350,10 @@ export class Runtime {
       this.adaptResolution(dt);
     }
     if (sfx.ready) sfx.startAmbience();
+    const g = this.game;
+    sfx.duckMusic(!this.attract && g.ballLive && (g.phase === 'toss' || g.phase === 'rally'));
+    if (!this.attract && !g.isPractice && g.phase !== this.prevPhase && g.phase === 'serve' && g.server === 0 && screen === 'playing') sfx.yourServe();
+    this.prevPhase = g.phase;
     if (!this.attract) this.publishHud();
     this.publishUiState();
     requestAnimationFrame(this.frame);
@@ -396,7 +419,17 @@ export class Runtime {
   private handleEvents(events: GameEvent[]): void {
     for (const e of events) {
       const pan = Math.max(-1, Math.min(1, this.game.ball.p.x / HALF_W));
-      if (e.type === 'hit') this.onHit(e);
+      if (e.type === 'hit') {
+        this.floorPlayed = false;
+        this.onHit(e);
+      } else if (e.type === 'toss') {
+        this.floorPlayed = false;
+        sfx.toss(pan);
+      } else if (e.type === 'floor') {
+        // The ball keeps bouncing on the deck; one sound (with its own little rebounds) is enough.
+        if (!this.floorPlayed) sfx.floor(pan);
+        this.floorPlayed = true;
+      }
       else if (e.type === 'bounce') {
         sfx.bounce(e.speed, pan);
         this.world.bounceRing(this.game.ball.p.x, this.game.ball.p.z);
@@ -409,10 +442,12 @@ export class Runtime {
       } else if (e.type === 'game' && this.game.winner === null) {
         const [a, b] = this.game.score.history.at(-1) ?? [0, 0];
         this.banner({ kind: 'game', icon: e.winner === 0 ? '✓' : '✕', text: e.winner === 0 ? 'Game!' : `Game: ${this.opName}`, sub: `${a}–${b}` });
+        if (e.winner === 0) sfx.gameWon();
+        else sfx.gameLost();
       } else if (e.type === 'match') {
         store.set({ winner: e.winner });
         if (e.winner === 0) sfx.win();
-        else sfx.pointLost();
+        else sfx.lose();
       }
     }
     if (this.game.phase === 'matchOver' && store.get().screen === 'playing') {
@@ -480,6 +515,8 @@ export class Runtime {
     store.set({ matchPoint: mp });
 
     if (won && (rally >= 8 || kmh >= 55)) store.set({ celebrate: { key: ++this.key, line: `${rally}-hit rally · ${kmh} km/h winner` } });
+    // Match point or deuce: the match music gets busier until the pressure is off.
+    sfx.musicIntensity(mp !== null || (a >= 10 && b >= 10));
     if (deuce) sfx.deuce();
     else if (mp !== null) sfx.matchPoint();
     if (deuce) this.banner({ kind: 'deuce', icon: '=', text: 'Deuce', sub: 'Win two points in a row' });

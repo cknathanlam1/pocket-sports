@@ -295,3 +295,9 @@
 .vs-status { display: flex; gap: 10px; align-items: center; font: 600 16px var(--font-ui); }
 .vs-empty { flex: 1; display: grid; place-items: center; font: 600 30px var(--font-script); color: var(--ink-500); }
 .hud-vs { position: absolute; right: 36px; bottom: 74px; font-size: 15px; }
+
+/* Settings: effects + music sliders */
+.vol-col { display: flex; flex-direction: column; gap: 6px; }
+.vol-row { display: flex; align-items: center; gap: 12px; font: 600 15px var(--font-ui); color: var(--ink-700); }
+.vol-row span { width: 56px; }
+.vol-row input { width: 160px; }

@@ -94,19 +94,19 @@ function Settings() {
         <div className="setting-row">
           <div>
             <div className="row-title">Sound</div>
-            <div className="row-desc">Hits, bounces, crowd and music stings.</div>
+            <div className="row-desc">Hits, bounces and crowd, plus the poolside soundtrack.</div>
           </div>
           <div className="seg-row" style={{ alignItems: 'center' }}>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={audio.volume}
-              aria-label="Volume"
-              onChange={(e) => store.set({ audio: { ...audio, volume: +e.target.value, muted: false } })}
-              style={{ width: 160 }}
-            />
+            <div className="vol-col">
+              <label className="vol-row">
+                <span>Effects</span>
+                <input type="range" min={0} max={1} step={0.05} value={audio.volume} onChange={(e) => store.set({ audio: { ...audio, volume: +e.target.value, muted: false } })} />
+              </label>
+              <label className="vol-row">
+                <span>Music</span>
+                <input type="range" min={0} max={1} step={0.05} value={audio.music} onChange={(e) => store.set({ audio: { ...audio, music: +e.target.value, muted: false } })} />
+              </label>
+            </div>
             <button className={`seg small ${audio.muted ? 'on' : ''}`} aria-pressed={audio.muted} onClick={() => store.set({ audio: { ...audio, muted: !audio.muted } })}>
               {audio.muted ? 'Muted' : 'Mute'}
             </button>
