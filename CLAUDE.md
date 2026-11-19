@@ -2,7 +2,7 @@
 
 Browser game: the laptop renders a 3D table tennis match (Three.js); a phone joins by QR
 code (no install) and becomes a motion-controlled paddle. Built milestone by milestone
-(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M5 built** (Render deploy config, production server hardening, error states, performance pass) on top of M4 audio/practice/tutorial, M3 phone swings and the Claude Design reskin. First deploy and real-phone verification are pending.
+(M0 scaffold → M5 deploy); see the build spec for the full plan. Current: **M5 built + online 2-player + beach volleyball + local 2-player (two phones)** (Render deploy config, production server hardening, error states, performance pass) on top of M4 audio/practice/tutorial, M3 phone swings and the Claude Design reskin. First deploy and real-phone verification are pending.
 
 ## Commands
 - Windows PowerShell blocks `npm.ps1`: use `npm.cmd ...` there (or Git Bash / cmd).
@@ -124,6 +124,28 @@ Each player uses their own laptop (and optionally their own phone; the mouse wor
   The opponent's paddle tilt streams at ~30 Hz (`vpq`). The far player's name/look come from `vhi`. Each player's own assist level applies to their own swings. The host picks best-of and starts and rematches.
 - Tests: `tests/net.test.ts` plays whole matches between two `Game`s over a fake network at 0/40/90 ms one-way (identical results, ball views within 5 cm). It also shows the grace window keeps returns at 300 ms one-way. `tests/rooms.test.ts` covers match rooms.
 - Known limits: if the host reloads, the match ends (the guest can leave from the pause card). The host decides close calls (tiny cross-browser float drift could disagree on an edge ball). Clients are trusted (fine for friends, not for strangers).
+
+### Beach volleyball (second sport)
+Pick it on the menu's SPORTS card (`store.sport`, persisted; the menu's background match switches too). Practice and Play a friend stay table tennis (picking them switches back).
+- `engine/volley/physics.ts`: gravity + drag (no spin), swept net (mesh = block, top = clip), sand landing with in/out (line counts in). Solvers: `lobTo` (passes/sets to a point with a given apex,
+  drag-corrected) and `driveTo` (spikes/serves: bisect the flat-branch pitch to land on target, then raise it until the net is cleared).
+- `engine/volley/game.ts` `VolleyGame`: 2 v 2. Each side has a **main player** (you or the CPU), who takes the 1st touch (dig) and the 3rd (attack), and an **AI setter** who always sets.
+  Same public surface as `Game` (update/swing/toss/events/score/contact…) so the runtime drives either; `hit` events carry `touch` (serve/dig/set/spike/tip).
+  Controls match table tennis: timing (window = assist window × `volley.windowScale`) → quality, and early/late = cross-court/line; swing speed → spike/serve power; hand tilt → depth;
+  an upward brush (path > 250°/s) = soft tip; a chopping swing on a dig = shank. Borderline timing injects net/long errors (attacks/serves) or a sprayed pass (digs). Lag-compensated like TT (ring buffer).
+  Scoring: rally scoring to 21 (`volley.pointsToWin`), deciding set to 15, win by 2 (`Score.target`; `rules.ts` takes the target). The rally winner serves. Landed in on side S → S loses; out → last toucher loses.
+  CPU: dig success by level and incoming speed (else a shank); it lets balls it predicts are out go. Serves/attacks go to random spots with level aim error and fault rate. All tuning in `config.volley` (dev panel).
+  Deviations: the human always serves for their team (no partner serve rotation); no blocking, no net-touch faults; a ball the net drops on your side ends the rally.
+- `display/scene/VolleyWorld.ts`: sand, sea, palms, umbrellas, spectators, 16 × 8 m court, net + antennas, four players (dig platform, overhead set, jump-and-swing attacks/serves; the main player's arm mirrors the phone between touches).
+  Shared art moved to `display/scene/kit.ts` (palette, toon/outline, ghost/unghost, sky/lights, palm, character, pose animation); `World.ts` uses it too.
+- Sounds: `sfx.volleyHit` (forearm thump, set pats, palm slap by power) and `sfx.sand`. The runtime picks the world from the game type (`this.game instanceof VolleyGame`).
+- Tests: `tests/volley.test.ts` (solver accuracy, 21/15 targets, side-out, full CPU set with dig/set/spike, a scripted human, a mistimed swing).
+
+### Local two-player (two phones, one laptop)
+Setup → Players: 2. The laptop opens a second pairing room (`PhoneHost('pocket-sports.room2')`, `runtime.host2`) and shows its QR; player 2's phone calibrates on the phone. Start waits for it.
+Player 2 is side 1 (`controllers: ['human', 'human']`); their swings and taps go through the same lag-compensated `game.swing(1, …)`. No internet hop, so latency is just phone → laptop.
+Works for both sports. The camera switches to a side view (`setView('side')`, nobody see-through). HUD, banners and results say Player 1/Player 2. Each phone gets its own UI state (`publishUiState2` from side 1) and its own hit feedback.
+A dropped phone pauses the match. Settings `players` is persisted.
 
 ## Phone testing over HTTPS
 iOS only exposes motion sensors in a secure context, so plain `http://<lan-ip>:5173` won't do.

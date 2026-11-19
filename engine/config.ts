@@ -79,6 +79,47 @@ export const defaultConfig = {
   match: {
     pointPauseMs: 1600,
   },
+  // Beach volleyball (engine/volley). Court 16 × 8 m, net at z = 0. Rally scoring: every rally scores.
+  volley: {
+    gameSpeed: 0.8, // sim runs slower than real time so there's time to react
+    gravity: 9.81,
+    dragK: 0.018, // 1/m, a = −k·|v|·v (light ball, big cross-section)
+    ballR: 0.105, // m
+    halfL: 8, // m, half court length
+    halfW: 4, // m, half court width
+    netHeight: 2.35, // m (between the men's 2.43 and women's 2.24)
+    netHalfW: 4.5, // m, antennas just outside the sidelines
+    digHeight: 0.8, // m: ideal dig contact on the ball's way down
+    setHeight: 2.4, // m: setter's hands
+    attackHeight: 3.0, // m: top of the jump
+    serveContact: 2.9, // m: jump-serve contact on the way down
+    passApex: 4.3, // m above the sand
+    setApex: 4.8,
+    tossApex: 4.0,
+    setterGap: 1.1, // m from the net where passes go
+    attackGap: 1.4, // m from the net where sets go
+    attackLane: 2.2, // m from the centre line (the attacker's side)
+    spikeMin: 11, // m/s at the slowest swing
+    spikeMax: 26, // m/s at the fastest
+    tipSpeed: 8, // upward-brush swing = soft shot over the block
+    serveMin: 9,
+    serveMax: 19,
+    windowScale: 1.5, // timing windows are the assist window × this (bigger, slower ball)
+    lateralRange: 2.8, // m of aim from early/late timing
+    depthNear: 2.6, // m past the net, closed face
+    depthFar: 7.2, // m past the net, open face
+    passErrorM: 1.4, // m: borderline dig lands this far off target
+    humanSpeed: 7, // m/s auto-movement
+    mateSpeed: 6.5,
+    pointsToWin: 21,
+    decidingSetPoints: 15,
+    cpuServeDelayMs: 1400,
+    cpu: {
+      easy: { digRate: 0.6, attackSpeed: 14, aimErrorM: 1.2, errorRate: 0.14 },
+      normal: { digRate: 0.72, attackSpeed: 18, aimErrorM: 0.8, errorRate: 0.08 },
+      hard: { digRate: 0.84, attackSpeed: 22, aimErrorM: 0.5, errorRate: 0.04 },
+    } satisfies Record<CpuLevel, { digRate: number; attackSpeed: number; aimErrorM: number; errorRate: number }>,
+  },
   net: {
     p2pTimeoutMs: 3000,
     clockSyncIntervalMs: 10_000,

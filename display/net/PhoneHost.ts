@@ -25,7 +25,11 @@ export class PhoneHost {
   private listeners = new Set<(s: PhoneStatus) => void>();
   status: PhoneStatus = { serverUp: false, code: null, url: null, transport: 'none', phone: 'none', rtt: null };
 
-  constructor() {
+  private readonly roomKey: string;
+
+  /** roomKey: sessionStorage key for the room (the second phone in local two-player uses its own). */
+  constructor(roomKey = ROOM_KEY) {
+    this.roomKey = roomKey;
     this.conn.onOpen(() => {
       this.set({ serverUp: true });
       const saved = this.loadRoom();
@@ -94,7 +98,7 @@ export class PhoneHost {
   // The room survives a page reload (sessionStorage), so the phone doesn't need to rescan.
   private loadRoom(): { code: string; token: string } | null {
     try {
-      return JSON.parse(sessionStorage.getItem(ROOM_KEY) ?? 'null') as { code: string; token: string } | null;
+      return JSON.parse(sessionStorage.getItem(this.roomKey) ?? 'null') as { code: string; token: string } | null;
     } catch {
       return null;
     }
@@ -102,7 +106,7 @@ export class PhoneHost {
 
   private saveRoom(code: string, token: string): void {
     try {
-      sessionStorage.setItem(ROOM_KEY, JSON.stringify({ code, token }));
+      sessionStorage.setItem(this.roomKey, JSON.stringify({ code, token }));
     } catch {
       /* private mode */
     }
@@ -110,7 +114,7 @@ export class PhoneHost {
 
   private clearRoom(): void {
     try {
-      sessionStorage.removeItem(ROOM_KEY);
+      sessionStorage.removeItem(this.roomKey);
     } catch {
       /* ignore */
     }

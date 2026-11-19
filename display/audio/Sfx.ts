@@ -280,6 +280,32 @@ export class Sfx {
     this.marimba(659, t + 0.08, 0.14);
   }
 
+  /** Volleyball contact: forearm thump (dig), soft double pat (set), loud palm slap (spike/serve), light pat (tip). */
+  volleyHit(touch: 'serve' | 'dig' | 'set' | 'spike' | 'tip', kmh: number, pan: Pan): void {
+    const k = Math.max(0, Math.min(1, (kmh - 20) / 60));
+    if (touch === 'dig') {
+      this.tone(150, 0.12, 0.4, { pan, glide: 0.7 });
+      this.noise(0.06, 0.18, { type: 'lowpass', freq: 700 }, { pan });
+    } else if (touch === 'set') {
+      const t = this.ctx?.currentTime ?? 0;
+      for (const dt of [0, 0.03]) this.noise(0.035, 0.12, { type: 'bandpass', freq: 900, q: 1 }, { pan, at: t + dt });
+      this.tone(260, 0.06, 0.12, { pan, at: t });
+    } else if (touch === 'tip') {
+      this.noise(0.04, 0.12, { type: 'bandpass', freq: 1200, q: 1 }, { pan });
+    } else {
+      // Spike / serve: hand slap, louder and brighter with power, plus a body thump.
+      this.noise(0.07, 0.35 + 0.45 * k, { type: 'bandpass', freq: 1400 + 900 * k, q: 0.7 }, { pan });
+      this.tone(110, 0.14, 0.35 + 0.3 * k, { pan, glide: 0.6 });
+    }
+  }
+
+  /** Ball lands in the sand: soft "pff" and a low thud. */
+  sand(speed: number, pan: Pan): void {
+    const vol = Math.max(0.15, Math.min(0.8, speed / 18));
+    this.noise(0.16, vol * 0.35, { type: 'lowpass', freq: 900 }, { pan, attack: 0.004 });
+    this.tone(85, 0.12, vol * 0.4, { pan, glide: 0.7 });
+  }
+
   /** Ball machine launch (practice). */
   machine(): void {
     this.tone(90, 0.12, 0.25, { glide: 2.5 });

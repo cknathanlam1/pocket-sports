@@ -6,6 +6,8 @@ export type BestOf = 1 | 3 | 5;
 
 export interface Score {
   bestOf: BestOf;
+  /** Points to win a game (11 in table tennis; 21 or 15 in a volleyball set). Win by 2. */
+  target?: number;
   /** Who served first in game 0. */
   initialServer: Side;
   points: [number, number];
@@ -32,10 +34,10 @@ export function currentServer(s: Score): Side {
   return ((firstServerOfGame(s) + switches) % 2) as Side;
 }
 
-export function gameWinner(points: [number, number]): Side | null {
+export function gameWinner(points: [number, number], target = 11): Side | null {
   const [a, b] = points;
-  if (a >= 11 && a - b >= 2) return 0;
-  if (b >= 11 && b - a >= 2) return 1;
+  if (a >= target && a - b >= 2) return 0;
+  if (b >= target && b - a >= 2) return 1;
   return null;
 }
 
@@ -48,7 +50,7 @@ export type PointResult = { gameOver: Side | null; matchOver: Side | null };
 export function awardPoint(s: Score, winner: Side): PointResult {
   if (matchWinner(s) !== null) throw new Error('match already over');
   s.points[winner]++;
-  const g = gameWinner(s.points);
+  const g = gameWinner(s.points, s.target);
   if (g === null) return { gameOver: null, matchOver: null };
   s.history.push([s.points[0], s.points[1]]);
   s.games[g]++;

@@ -20,7 +20,7 @@ function useFlash<T>(value: T | null, key: number | undefined, ms: number): T | 
 }
 
 function ScoreCard({ side }: { side: 0 | 1 }) {
-  const { hud, settings, banner, opponent } = useUi();
+  const { hud, settings, banner, opponent, local2p } = useUi();
   const chip = useFlash(side === 0 ? banner?.kind === 'won' : banner?.kind === 'lost', banner?.key, 900);
   if (!hud) return null;
   const pts = hud.points[side];
@@ -32,7 +32,7 @@ function ScoreCard({ side }: { side: 0 | 1 }) {
     <div className="hud-name-col" style={{ alignItems: side === 0 ? 'flex-start' : 'flex-end' }}>
       <div className="hud-name">
         {side === 1 && serving && <span className="serve-ball" title="Serving" />}
-        {side === 0 ? 'You' : opponent.name}
+        {side === 0 ? (local2p ? 'Player 1' : 'You') : opponent.name}
         {side === 0 && serving && <span className="serve-ball" title="Serving" />}
       </div>
       {settings.bestOf > 1 && (
@@ -158,13 +158,14 @@ function Banner() {
 }
 
 function Hint() {
-  const { hud, usingPhone, timing, opponent } = useUi();
+  const { hud, usingPhone, timing, opponent, local2p } = useUi();
   const t = useFlash(timing, timing?.key, 900);
   if (!hud) return null;
   let text = '';
   if (hud.phase === 'serve' && hud.server === 0) text = usingPhone ? 'Tap your phone to toss, then swing!' : 'Press Space to toss, then click to swing!';
   else if (hud.phase === 'toss' && hud.server === 0) text = 'Swing as it drops!';
   else if (hud.phase === 'pointOver' && hud.server === 1) text = `Next serve: ${opponent.name}`;
+  if (local2p && hud.phase === 'serve') text = `Player ${hud.server + 1}: tap your phone to toss, then swing!`;
   if (t && !t.hit) text = Math.abs(t.offsetMs) < 400 ? (t.offsetMs < 0 ? 'A touch early…' : 'A touch late…') : 'Swing when the ball arrives…';
   return text ? <div className="coach script">{text}</div> : null;
 }

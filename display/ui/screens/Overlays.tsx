@@ -54,7 +54,10 @@ export function Paused({ rt }: { rt: Runtime }) {
 }
 
 function ConnectionLost({ rt }: { rt: Runtime }) {
-  const { phone, hud } = useUi();
+  const { phone: phone1, phone2, hud, local2p } = useUi();
+  // Local two-player: show player 2's code if theirs is the phone that's missing.
+  const p2Lost = local2p && phone1.phone === 'calibrated' && phone2 !== null && phone2.phone !== 'calibrated';
+  const phone = p2Lost ? phone2 : phone1;
   const back = phone.phone === 'calibrated';
   return (
     <>
@@ -66,7 +69,7 @@ function ConnectionLost({ rt }: { rt: Runtime }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
               <div className="lost-kicker">
                 <span className="conn-shape lost" style={{ borderRadius: '50%' }} />
-                {back ? 'PHONE IS BACK · GAME PAUSED' : 'PHONE DISCONNECTED · GAME PAUSED'}
+                {back ? 'PHONE IS BACK · GAME PAUSED' : `${p2Lost ? 'PLAYER 2 ' : ''}PHONE DISCONNECTED · GAME PAUSED`}
               </div>
               <div className="h-display" style={{ fontSize: 52, lineHeight: 1.02 }}>
                 {back ? 'Paddle found!' : 'Lost your paddle!'}
@@ -91,7 +94,7 @@ function ConnectionLost({ rt }: { rt: Runtime }) {
                   </div>
                 )}
                 <button className="link-btn" onClick={() => rt.resume()}>
-                  {back ? '' : 'Resume with the mouse ›'}
+                  {back || local2p ? '' : 'Resume with the mouse ›'}
                 </button>
               </div>
             </div>
@@ -103,8 +106,9 @@ function ConnectionLost({ rt }: { rt: Runtime }) {
 }
 
 export function Results({ rt }: { rt: Runtime }) {
-  const { winner, hud, settings, stats, look, opponent, mode, vs } = useUi();
-  const won = winner === 0;
+  const { winner, hud, settings, stats, look, opponent, mode, vs, local2p } = useUi();
+  const won = winner === 0 || local2p;
+  const p1 = local2p ? 'Player 1' : 'You';
   const online = mode === 'versus';
   const canRematch = !online || vs?.role === 'host';
   const games = hud?.games ?? [0, 0];
@@ -123,13 +127,13 @@ export function Results({ rt }: { rt: Runtime }) {
           <div className="results-left">
             <div className="results-disc" />
             <div style={{ position: 'relative', marginBottom: 60 }}>
-              <Char size={600} pose={won ? 'cheer' : 'sad'} look={won ? look : opponent.look} paddle={won ? '#2F6FDB' : '#FF8A1F'} />
+              <Char size={600} pose={won ? 'cheer' : 'sad'} look={winner === 0 ? look : opponent.look} paddle={won ? '#2F6FDB' : '#FF8A1F'} />
             </div>
           </div>
           <div className="results-right">
-            <div className="results-title">{won ? 'You win!' : `${opponent.name} wins`}</div>
+            <div className="results-title">{local2p ? `${winner === 0 ? 'Player 1' : 'Player 2'} wins!` : won ? 'You win!' : `${opponent.name} wins`}</div>
             <div className="results-chips">
-              <span className="res-chip p1">● You {games[0]}</span>
+              <span className="res-chip p1">● {p1} {games[0]}</span>
               <span className="res-chip p2">◆ {opponent.name} {games[1]}</span>
               <span className="res-games">{hud?.history.map(([a, b]) => `${a}–${b}`).join(' · ')}</span>
             </div>

@@ -66,7 +66,8 @@ export interface GameSettings {
 }
 
 export type GameEvent =
-  | { type: 'hit'; side: Side; speed: number; strength: number; serve: boolean; offsetMs?: number; timing?: TimingClass }
+  /** touch: volleyball only (which kind of contact), for sounds and animation. */
+  | { type: 'hit'; side: Side; speed: number; strength: number; serve: boolean; offsetMs?: number; timing?: TimingClass; touch?: 'serve' | 'dig' | 'set' | 'spike' | 'tip' }
   | { type: 'whiff'; side: Side; offsetMs?: number; reason: 'timing' | 'reach' | 'no-ball' }
   | { type: 'toss'; side: Side }
   | { type: 'bounce'; side: Side; speed: number }
@@ -120,6 +121,7 @@ interface RingEntry {
 const HAND_OFFSET = 0.4; // m from body centre to paddle contact, sideways
 
 export class Game {
+  readonly sport = 'tt' as const;
   readonly cfg: Config;
   readonly settings: GameSettings;
   readonly rng: Rng;

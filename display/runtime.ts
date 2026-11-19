@@ -1,7 +1,8 @@
 // Owns the renderer, the world, the input sources and the current Game; runs the frame loop and
 // the screen flow (pairing → calibrate → menu → setup → match → results).
 import * as THREE from 'three';
-import { Game, type GameEvent, type MachineSettings } from '../engine/game.ts';
+import { Game, type GameEvent, type GameSettings, type MachineSettings } from '../engine/game.ts';
+import { VolleyGame } from '../engine/volley/game.ts';
 import { applyNet, encodeNet, mirrorScore } from '../engine/net.ts';
 import { HALF_W, type Side, other } from '../engine/physics.ts';
 import type { PointReason } from '../engine/referee.ts';
@@ -13,8 +14,16 @@ import { MouseInput } from './input/MouseInput.ts';
 import type { PaddleInput, Swing } from './input/PaddleInput.ts';
 import { PhoneHost } from './net/PhoneHost.ts';
 import { VersusLink, type VsStatus } from './net/VersusLink.ts';
+import { VolleyWorld } from './scene/VolleyWorld.ts';
 import { World } from './scene/World.ts';
-import { type Banner, MARLO, type MenuSettings, type Screen, emptyStats, store } from './store.ts';
+import { MARLO_LOOK } from '../shared/art/Char.tsx';
+import { type Banner, MARLO, type MenuSettings, type Screen, type Sport, emptyStats, store } from './store.ts';
+
+/** Either sport's match: both expose the same update/swing/toss/score/event surface. */
+type AnyGame = Game | VolleyGame;
+
+/** Local two-player: the second player's name and look. */
+const P2 = { name: 'Player 2', look: MARLO_LOOK };
 
 const LOST_REASON: Record<PointReason, string> = {
   out: 'Just out',
@@ -40,10 +49,15 @@ export class Runtime {
   /** Live tuning values (defaults + dev-panel overrides). Games read this object directly. */
   readonly cfg = loadConfig();
   readonly host = new PhoneHost();
+  /** Second phone (local two-player), created when "2 players" is picked. */
+  host2: PhoneHost | null = null;
   private renderer: THREE.WebGLRenderer;
-  private world = new World();
+  private tt = new World();
+  private volleyWorld: VolleyWorld | null = null;
+  private size = { w: 1, h: 1 };
   private mouse = new MouseInput();
-  game: Game;
+  game: AnyGame;
+  private sentUi2 = '';
   private attract = true;
   private key = 0;
   private last = performance.now();
@@ -82,7 +96,9 @@ export class Runtime {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       this.renderer.setSize(w, h, false);
-      this.world.resize(w, h);
+      this.size = { w, h };
+      this.tt.resize(w, h);
+      this.volleyWorld?.resize(w, h);
     };
     new ResizeObserver(resize).observe(canvas);
     resize();
@@ -90,6 +106,7 @@ export class Runtime {
     this.game = this.newAttractGame();
     this.applyLooks();
     store.subscribe(() => {
+      if (store.get().settings.players === 2) this.ensureHost2();
       this.applyLooks();
       this.introduce();
       const a = store.get().audio;
@@ -203,20 +220,25 @@ export class Runtime {
     return (this.mouse.face() * 180) / Math.PI;
   }
 
-  private onSwing(s: Swing): void {
+  private onSwing(s: Swing, side: Side = 0): void {
     const screen = store.get().screen;
+    if (side === 1 && !store.get().local2p) return;
     if (screen === 'playing' || screen === 'tutorial') sfx.swing(s.peak);
-    if (this.swingTap) return this.swingTap(s);
+    if (this.swingTap && side === 0) return this.swingTap(s);
     if (this.attract || store.get().screen !== 'playing') return;
-    const r = this.game.swing(0, (performance.now() - s.t) / 1000, s);
+    const r = this.game.swing(side, (performance.now() - s.t) / 1000, s);
     this.flushNet();
     if (r.result !== 'none' && r.offsetMs !== undefined)
       store.set({ timing: { key: ++this.key, offsetMs: r.offsetMs, timing: r.timing ?? 'miss', hit: r.result === 'hit' } });
   }
 
   /** Space or phone tap: toss in a match. From the phone a tap also drives the menus. */
-  private onTap(fromPhone: boolean): void {
+  private onTap(fromPhone: boolean, side: Side = 0): void {
     const { screen, settings } = store.get();
+    if (side === 1) {
+      if (screen === 'playing' && store.get().local2p) this.game.toss(1);
+      return;
+    }
     if (screen === 'playing') {
       this.game.toss(0);
       this.flushNet();
@@ -225,20 +247,100 @@ export class Runtime {
     if (!fromPhone || !this.phoneReady) return;
     if (screen === 'lobby' && this.vs?.status.role === 'host' && this.vs.connected) this.hostStartVersus(store.get().settings.bestOf);
     else if (screen === 'menu') this.go('setup');
-    else if (screen === 'setup') this.startMatch(settings);
+    else if (screen === 'setup' && this.canStart(settings)) this.startMatch(settings);
     else if (screen === 'matchOver') this.rematch();
     else if (screen === 'paused') this.resume();
   }
 
-  private newAttractGame(): Game {
-    return new Game({ cpuLevel: 'hard', assist: 'normal', bestOf: 5, controllers: ['cpu', 'cpu'] }, this.cfg);
+  private get sport(): Sport {
+    return store.get().sport;
+  }
+
+  /** The 3D venue for the current game's sport (the volleyball beach is built on first use). */
+  private get world(): World | VolleyWorld {
+    return this.game instanceof VolleyGame ? this.vworld : this.tt;
+  }
+
+  private get vworld(): VolleyWorld {
+    if (!this.volleyWorld) {
+      const v = this.cfg.volley;
+      this.volleyWorld = new VolleyWorld(v.ballR, v.halfL, v.halfW, v.netHeight, v.netHalfW);
+      this.volleyWorld.resize(this.size.w, this.size.h);
+    }
+    return this.volleyWorld;
+  }
+
+  private newAttractGame(): AnyGame {
+    const s = { cpuLevel: 'hard', assist: 'normal', controllers: ['cpu', 'cpu'] } satisfies Omit<GameSettings, 'bestOf'>;
+    return this.sport === 'volley' ? new VolleyGame({ ...s, bestOf: 3 }, this.cfg) : new Game({ ...s, bestOf: 5 }, this.cfg);
+  }
+
+  /** Pick the sport (menu SPORTS card). The menu's background match switches with it. */
+  setSport(sport: Sport): void {
+    if (sport === this.sport) return;
+    this.sportBefore = null;
+    store.set({ sport });
+    if (this.attract) {
+      this.game = this.newAttractGame();
+      this.world.setView('behind');
+      this.applyLooks();
+    }
+  }
+
+  /** Practice and online play are table tennis only: switch for them, and switch back afterwards. */
+  private sportBefore: Sport | null = null;
+
+  private useTableTennis(): void {
+    if (this.sport === 'tt') return;
+    const before = this.sport;
+    this.setSport('tt');
+    this.sportBefore = before;
+  }
+
+  private restoreSport(): void {
+    const s = this.sportBefore;
+    if (s) this.setSport(s);
+  }
+
+  /** Second phone for local two-player: its own room and QR code, its swings drive side 1. */
+  ensureHost2(): PhoneHost {
+    if (this.host2) return this.host2;
+    const h = new PhoneHost('pocket-sports.room2');
+    this.host2 = h;
+    h.input.onSwing((s) => this.onSwing(s, 1));
+    h.input.onTap(() => this.onTap(true, 1));
+    h.input.onPause(() => {
+      if (!store.get().local2p) return;
+      const sc = store.get().screen;
+      if (sc === 'playing') this.pause('user');
+      else if (sc === 'paused') this.resume();
+    });
+    h.onStatus((st) => {
+      const prev = store.get().phone2;
+      store.set({ phone2: st });
+      if (prev?.transport === 'none' && st.transport !== 'none') sfx.connect();
+      if (prev && prev.transport !== 'none' && st.transport === 'none') sfx.disconnect();
+      if (st.transport === 'none') this.sentUi2 = '';
+      if (store.get().local2p && store.get().screen === 'playing' && st.phone !== 'calibrated') this.pause('phone');
+    });
+    return h;
+  }
+
+  private get phone2Ready(): boolean {
+    return this.host2?.status.phone === 'calibrated';
   }
 
   private applyLooks(): void {
     this.world.setLooks(this.attract ? { ...store.get().look, outfit: '#2F6FDB' } : store.get().look, store.get().opponent.look);
   }
 
+  /** Two players need player 2's phone calibrated first. */
+  canStart(s: MenuSettings): boolean {
+    return s.players !== 2 || this.phone2Ready;
+  }
+
   startMatch(s: MenuSettings): void {
+    if (!this.canStart(s)) return;
     if (this.vs) this.closeVersus();
     store.set({
       settings: s,
@@ -256,10 +358,13 @@ export class Runtime {
     });
     this.attract = false;
     this.lastPoint = undefined;
-    this.game = new Game({ ...s, controllers: ['human', 'cpu'], initialServer: Math.random() < 0.5 ? 0 : 1 }, this.cfg);
+    const local2p = s.players === 2;
+    const settings = { ...s, controllers: ['human', local2p ? 'human' : 'cpu'] as const, initialServer: (Math.random() < 0.5 ? 0 : 1) as Side };
+    this.game = this.sport === 'volley' ? new VolleyGame({ ...settings, controllers: [...settings.controllers] }, this.cfg) : new Game({ ...settings, controllers: [...settings.controllers] }, this.cfg);
     this.hudSig = '';
     this.oohDone = false;
-    store.set({ mode: 'match' });
+    store.set({ mode: 'match', local2p, opponent: local2p ? P2 : MARLO });
+    this.world.setView(local2p ? 'side' : 'behind');
     this.world.setPractice(false);
     this.applyLooks();
   }
@@ -267,6 +372,7 @@ export class Runtime {
   /** Practice: ball machine on the far side, live-adjustable, no score. */
   startPractice(): void {
     if (this.vs) this.closeVersus();
+    this.useTableTennis();
     const { settings, machine } = store.get();
     store.set({
       screen: 'playing',
@@ -306,6 +412,7 @@ export class Runtime {
   /** fromRemote: the opponent resumed. Online, the rally in progress is replayed from the serve on both laptops. */
   resume(fromRemote = false): void {
     if (store.get().screen !== 'paused') return;
+    if (store.get().local2p && !(this.phoneReady && this.phone2Ready) && store.get().pauseReason === 'phone') return;
     if (this.isVersus) {
       if (!this.vs?.connected) return; // can't resume without the opponent
       if (!fromRemote) this.vs.send({ k: 'vpz', on: false });
@@ -318,6 +425,10 @@ export class Runtime {
 
   quitToMenu(): void {
     if (this.isVersus) return this.leaveVersusMatch();
+    store.set({ local2p: false, opponent: MARLO });
+    this.tt.setView('behind');
+    this.volleyWorld?.setView('behind');
+    if (this.game.isPractice) this.restoreSport();
     this.attract = true;
     this.game = this.newAttractGame();
     store.set({ screen: 'menu', mode: 'match', hud: null, banner: null, timing: null, hitFx: null, celebrate: null, usingPhone: false, pauseReason: null, matchPoint: null });
@@ -344,7 +455,9 @@ export class Runtime {
     // The near paddle mirrors the phone whenever one is calibrated (even on the menu, as live feedback).
     const q = this.phoneReady ? this.host.input.orientation() : this.attract ? null : this.mouse.orientation();
     if (this.isVersus) this.versusFrame(now, q);
-    this.world.sync(this.game, q, dt, this.farQ && now - this.farQAt < 500 ? this.farQ : null);
+    const farQ = store.get().local2p ? (this.phone2Ready ? this.host2!.input.orientation() : null) : this.farQ && now - this.farQAt < 500 ? this.farQ : null;
+    if (this.game instanceof VolleyGame) this.vworld.sync(this.game, q, dt, farQ);
+    else this.tt.sync(this.game, q, dt, farQ);
     if (!Runtime.OPAQUE.has(screen)) {
       this.renderer.render(this.world.scene, this.world.camera);
       this.adaptResolution(dt);
@@ -356,6 +469,7 @@ export class Runtime {
     this.prevPhase = g.phase;
     if (!this.attract) this.publishHud();
     this.publishUiState();
+    this.publishUiState2();
     requestAnimationFrame(this.frame);
   };
 
@@ -376,6 +490,28 @@ export class Runtime {
     this.renderer.setPixelRatio(next);
     const c = this.renderer.domElement;
     this.renderer.setSize(c.clientWidth, c.clientHeight, false);
+  }
+
+  /** "You"/the opponent, or Player 1/Player 2 in local two-player. */
+  private sideName(side: Side): string {
+    if (store.get().local2p) return side === 0 ? 'Player 1' : 'Player 2';
+    return side === 0 ? 'You' : this.opName;
+  }
+
+  /** Local two-player: player 2's phone sees the match from side 1. */
+  private publishUiState2(): void {
+    const h = this.host2;
+    if (!h || h.status.transport === 'none') return;
+    const screen = store.get().screen;
+    const g = this.game;
+    const inMatch = !this.attract && store.get().local2p && (screen === 'playing' || screen === 'paused');
+    const s: UiState = !inMatch ? 'lobby' : screen === 'paused' ? 'paused' : g.phase === 'serve' && g.server === 1 ? 'serve' : g.phase === 'toss' || g.phase === 'rally' ? 'rally' : 'between';
+    const pt: 'won' | 'lost' | undefined = s === 'between' && g.lastPoint?.winner != null ? (g.lastPoint.winner === 1 ? 'won' : 'lost') : undefined;
+    const msg = { k: 'st' as const, s, sc: inMatch ? ([g.score.points[1], g.score.points[0]] as [number, number]) : undefined, pt, nx: g.server === 1, op: 'Player 1' };
+    const sig = JSON.stringify(msg);
+    if (sig === this.sentUi2) return;
+    this.sentUi2 = sig;
+    h.send(msg);
   }
 
   /** Tell the phone what to show (serve / rally / between / paused / lobby) plus score context. */
@@ -431,7 +567,8 @@ export class Runtime {
         this.floorPlayed = true;
       }
       else if (e.type === 'bounce') {
-        sfx.bounce(e.speed, pan);
+        if (this.game instanceof VolleyGame) sfx.sand(e.speed, pan);
+        else sfx.bounce(e.speed, pan);
         this.world.bounceRing(this.game.ball.p.x, this.game.ball.p.z);
       } else if (e.type === 'net') sfx.net(e.kind, pan);
       else if (e.type === 'practice') this.onPractice(e);
@@ -441,7 +578,9 @@ export class Runtime {
         this.banner({ kind: 'let', icon: '↺', text: 'Let', sub: 'Replay the serve' });
       } else if (e.type === 'game' && this.game.winner === null) {
         const [a, b] = this.game.score.history.at(-1) ?? [0, 0];
-        this.banner({ kind: 'game', icon: e.winner === 0 ? '✓' : '✕', text: e.winner === 0 ? 'Game!' : `Game: ${this.opName}`, sub: `${a}–${b}` });
+        const unit = this.game instanceof VolleyGame ? 'Set' : 'Game';
+        const mine = e.winner === 0 || store.get().local2p;
+        this.banner({ kind: 'game', icon: mine ? '✓' : '✕', text: store.get().local2p ? `${unit}: ${this.sideName(e.winner)}` : e.winner === 0 ? `${unit}!` : `${unit}: ${this.opName}`, sub: `${a}–${b}` });
         if (e.winner === 0) sfx.gameWon();
         else sfx.gameLost();
       } else if (e.type === 'match') {
@@ -471,8 +610,10 @@ export class Runtime {
     const b = this.game.ball.p;
     const pan = Math.max(-1, Math.min(1, b.x / HALF_W));
     if (this.game.isPractice && e.side === 1) sfx.machine();
+    else if (e.touch) sfx.volleyHit(e.touch, kmh, pan);
     else sfx.hit(kmh, pan);
-    if (!this.oohDone && this.game.rallyShots >= 8 && !this.game.isPractice) {
+    // Volleyball rallies count every touch, so the crowd waits longer before the "ooh".
+    if (!this.oohDone && this.game.rallyShots >= (e.touch ? 13 : 8) && !this.game.isPractice) {
       this.oohDone = true;
       sfx.ooh();
     }
@@ -481,21 +622,25 @@ export class Runtime {
     const st = [...stats] as typeof stats;
     st[e.side] = { ...st[e.side], fastest: Math.max(st[e.side].fastest, kmh) };
     store.set({ stats: st });
-    if (e.side !== 0) return;
-    const tier = hitTier(kmh, e.offsetMs);
+    // Feedback goes to whoever hit it: you, or player 2 in local two-player. The AI setter's sets get none.
+    const hitter = e.side === 0 ? this.host : store.get().local2p ? this.host2 : null;
+    if (!hitter || e.touch === 'set') return;
+    const tier = e.touch === 'dig' || e.touch === 'tip' ? 'nice' : hitTier(kmh, e.offsetMs);
     const fx = TIER_FX[tier];
     this.world.spark(b.x, b.y, b.z, tier !== 'nice');
     // Hit-stop freezes our sim; online that would put this laptop behind the other one, so skip it.
     if (!this.isVersus) this.freezeUntil = performance.now() + fx.stopMs;
     if (fx.shake) this.world.shake(fx.shake, fx.hits);
     store.set({ hitFx: { key: ++this.key, tier, kmh } });
-    this.host.send({ k: 'hit', strength: e.strength, tier, kmh, rally: this.game.rallyShots });
+    hitter.send({ k: 'hit', strength: e.strength, tier, kmh, rally: this.game.rallyShots });
   }
 
   private onPoint(winner: Side, reason: PointReason): void {
     const g = this.game;
-    const won = winner === 0;
-    this.lastPoint = won ? 'won' : 'lost';
+    const local2p = store.get().local2p;
+    // Local two-player: both players are "you", so every point is celebrated.
+    const won = winner === 0 || local2p;
+    this.lastPoint = winner === 0 ? 'won' : 'lost';
     this.oohDone = false;
     this.world.pose(winner, 'cheer');
     this.world.pose(other(winner), 'sad');
@@ -510,17 +655,20 @@ export class Runtime {
     const rally = g.rallies.at(-1) ?? 0;
     const kmh = this.lastHitKmh[winner];
     const [a, b] = g.score.points;
-    const deuce = a >= 10 && b >= 10 && a === b;
+    const t = g.score.target ?? 11;
+    const deuce = a >= t - 1 && b >= t - 1 && a === b;
     const mp = this.matchPointSide();
     store.set({ matchPoint: mp });
 
     if (won && (rally >= 8 || kmh >= 55)) store.set({ celebrate: { key: ++this.key, line: `${rally}-hit rally · ${kmh} km/h winner` } });
     // Match point or deuce: the match music gets busier until the pressure is off.
-    sfx.musicIntensity(mp !== null || (a >= 10 && b >= 10));
+    sfx.musicIntensity(mp !== null || (a >= t - 1 && b >= t - 1));
     if (deuce) sfx.deuce();
     else if (mp !== null) sfx.matchPoint();
     if (deuce) this.banner({ kind: 'deuce', icon: '=', text: 'Deuce', sub: 'Win two points in a row' });
+    else if (mp !== null && local2p) this.banner({ kind: 'matchpoint', icon: '★', text: `Match point: ${this.sideName(mp)}`, sub: 'One point to win it all' });
     else if (mp !== null) this.banner({ kind: 'matchpoint', icon: '★', text: mp === 0 ? 'Match point' : `Match point: ${this.opName}`, sub: mp === 0 ? 'One point to win it all' : 'Hang in there' });
+    else if (local2p) this.banner({ kind: 'won', icon: '✓', text: `Point: ${this.sideName(winner)}`, sub: reason === 'missed return' || reason === 'double bounce' ? `Winner · ${kmh} km/h` : `${this.sideName(other(winner))}: ${LOST_REASON[reason].toLowerCase()}` });
     else if (won) this.banner({ kind: 'won', icon: '✓', text: 'Point!', sub: reason === 'missed return' || reason === 'double bounce' ? `Winner · ${kmh} km/h` : `${this.opName}: ${LOST_REASON[reason].toLowerCase()}` });
     else this.banner({ kind: 'lost', icon: '✕', text: 'Missed it', sub: LOST_REASON[reason] });
   }
@@ -537,6 +685,7 @@ export class Runtime {
 
   /** Host (no code) or join (code) an online match and open the lobby. */
   openVersus(code?: string): void {
+    this.useTableTennis();
     this.vs?.close();
     const vs = new VersusLink(code ? 'guest' : 'host', code);
     this.vs = vs;
@@ -555,6 +704,7 @@ export class Runtime {
     vs?.close();
     if (this.isVersus) this.toAttract();
     store.set({ vs: null, opponent: MARLO });
+    this.restoreSport();
     this.applyLooks();
   }
 
@@ -687,6 +837,7 @@ export class Runtime {
       const bx = before.x;
       const by = before.y;
       const bz = before.z;
+      if (!(this.game instanceof Game)) return;
       const ok = applyNet(m, this.game, Math.max(0, (this.vs?.oneWayMs ?? 40) - sinceFrame));
       // The opponent's hit lands a one-way delay late, so the ball jumps forward along its new path.
       // Ease the drawn ball from where it was instead of snapping.
@@ -712,7 +863,7 @@ export class Runtime {
 
   /** Send the game's outgoing events right away (also called straight after a swing or toss). */
   private flushNet(): void {
-    if (!this.vs || !this.isVersus) return;
+    if (!this.vs || !this.isVersus || !(this.game instanceof Game)) return;
     for (const o of this.game.drainNet()) this.vs.send(encodeNet(o, this.game));
   }
 
@@ -723,7 +874,7 @@ export class Runtime {
     for (const side of [0, 1] as const) {
       const me = s.points[side];
       const them = s.points[other(side)];
-      if (me >= 10 && me - them >= 1 && s.games[side] === gamesToWin(s) - 1) return side;
+      if (me >= (s.target ?? 11) - 1 && me - them >= 1 && s.games[side] === gamesToWin(s) - 1) return side;
     }
     return null;
   }

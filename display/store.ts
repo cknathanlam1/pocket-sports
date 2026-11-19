@@ -17,7 +17,11 @@ export interface MenuSettings {
   cpuLevel: CpuLevel;
   assist: Assist;
   bestOf: BestOf;
+  /** 1 = you vs the CPU; 2 = two phones on this laptop (local two-player). */
+  players: 1 | 2;
 }
+
+export type Sport = 'tt' | 'volley';
 
 export type BannerKind = 'won' | 'lost' | 'deuce' | 'matchpoint' | 'let' | 'game';
 
@@ -76,6 +80,12 @@ export interface UiState {
   opponent: { name: string; look: Look };
   /** Your display name for online matches. */
   name: string;
+  /** Selected sport (menu SPORTS card). */
+  sport: Sport;
+  /** Second phone on this laptop (local two-player), once one is set up. */
+  phone2: PhoneStatus | null;
+  /** The current match is two players on this laptop (side camera, names P1/P2). */
+  local2p: boolean;
   machine: MachineSettings;
   practice: { streak: number; best: number; good: number; total: number; last: { key: number; result: PracticeResult } | null };
   /** volume = effects, music = soundtrack (0–1). */
@@ -89,6 +99,7 @@ const MACHINE_KEY = 'pocket-sports.machine';
 const AUDIO_KEY = 'pocket-sports.audio';
 const TUTORIAL_KEY = 'pocket-sports.tutorialDone';
 const NAME_KEY = 'pocket-sports.name';
+const SPORT_KEY = 'pocket-sports.sport';
 
 export const MARLO = { name: 'Marlo', look: MARLO_LOOK };
 
@@ -112,7 +123,7 @@ export const emptyStats = (): SideStats => ({ longest: 0, fastest: 0, winners: 0
 
 let state: UiState = {
   screen: 'title',
-  settings: load<MenuSettings>(SETTINGS_KEY, { cpuLevel: 'normal', assist: 'normal', bestOf: 3 }),
+  settings: load<MenuSettings>(SETTINGS_KEY, { cpuLevel: 'normal', assist: 'normal', bestOf: 3, players: 1 }),
   look: load<Look>(LOOK_KEY, P1_LOOK),
   hud: null,
   banner: null,
@@ -132,6 +143,9 @@ let state: UiState = {
   vs: null,
   opponent: MARLO,
   name: load<{ name: string }>(NAME_KEY, { name: 'Player' }).name,
+  sport: load<{ sport: Sport }>(SPORT_KEY, { sport: 'tt' }).sport,
+  phone2: null,
+  local2p: false,
   machine: load<MachineSettings>(MACHINE_KEY, { speed: 6, spin: 'none', placement: 'middle', intervalMs: 900 }),
   practice: { streak: 0, best: 0, good: 0, total: 0, last: null },
   audio: load(AUDIO_KEY, { volume: 0.8, muted: false, music: 0.5 }),
@@ -150,6 +164,7 @@ export const store = {
     if (patch.audio) save(AUDIO_KEY, patch.audio);
     if (patch.tutorialDone !== undefined) save(TUTORIAL_KEY, { done: patch.tutorialDone });
     if (patch.name !== undefined) save(NAME_KEY, { name: patch.name });
+    if (patch.sport !== undefined) save(SPORT_KEY, { sport: patch.sport });
     for (const l of listeners) l();
   },
   subscribe(fn: () => void): () => void {

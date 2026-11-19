@@ -5,30 +5,8 @@ import { ITTF } from '../../engine/config.ts';
 import type { Game } from '../../engine/game.ts';
 import { BALL_R, HALF_L, HALF_W, NET_HALF_W, TABLE_TOP, type Side, sideSign } from '../../engine/physics.ts';
 import type { Look } from '../../shared/art/Char.tsx';
+import { type Avatar, C, animatePose, applyLook, canvasTexture, ghost, makeAvatar, outlined, palm, skyAndLight, toon, unghost } from './kit.ts';
 import type { Quat } from '../../shared/protocol.ts';
-
-const C = {
-  ink: 0x10285a,
-  skyTop: '#3FB8FF',
-  skyBottom: '#C9F0FF',
-  sand: 0xf6ddb0,
-  sandLine: '#E8C98E',
-  pool: 0x5ccfe0,
-  table: 0x1fa59b,
-  tableEdge: 0x137a73,
-  white: 0xffffff,
-  cream: 0xfffdf8,
-  blush: 0xfadcd0,
-  window: 0x7fa2dc,
-  ball: 0xffd23f,
-  palm: 0x3fae6a,
-  trunk: 0x8a5a3a,
-  wood: 0xc98b5b,
-  pants: 0xf8f4ec,
-  p1: 0x2f6fdb,
-  p2: 0xff8a1f,
-  flags: [0xff5fa2, 0xffd23f, 0x5dc265, 0xff8a1f, 0x2f6fdb],
-};
 
 const BALL_VIS_R = BALL_R * 1.6; // drawn larger than real for readability on a laptop
 const GHOSTS = 4;
@@ -48,64 +26,9 @@ const BASE_Q = [new THREE.Quaternion(), new THREE.Quaternion().setFromAxisAngle(
 const RING_GEO = new THREE.RingGeometry(0.04, 0.06, 28);
 const SPARK_GEO = [new THREE.CircleGeometry(0.09, 5), new THREE.CircleGeometry(0.16, 5)] as const;
 
-// Three-step toon ramp shared by all materials.
-const ramp = (() => {
-  const t = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 210, 210, 210, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat);
-  t.minFilter = THREE.NearestFilter;
-  t.magFilter = THREE.NearestFilter;
-  t.needsUpdate = true;
-  return t;
-})();
-const toon = (color: THREE.ColorRepresentation, extra: THREE.MeshToonMaterialParameters = {}) => new THREE.MeshToonMaterial({ color, gradientMap: ramp, ...extra });
-const inkMat = new THREE.MeshBasicMaterial({ color: C.ink, side: THREE.BackSide });
-
-/** Inverted-hull outline: a slightly larger ink copy rendered back-faces only. */
-function outlined(geo: THREE.BufferGeometry, mat: THREE.Material, thickness = 1.06): THREE.Group {
-  const g = new THREE.Group();
-  g.add(new THREE.Mesh(geo, mat));
-  const hull = new THREE.Mesh(geo, inkMat);
-  hull.scale.setScalar(thickness);
-  g.add(hull);
-  return g;
-}
-
-/** See-through look for the near player, who stands between the camera and the ball. */
-const GHOST_OPACITY = 0.28;
-const ghostInk = new THREE.MeshBasicMaterial({ color: C.ink, side: THREE.BackSide, transparent: true, opacity: GHOST_OPACITY + 0.12, depthWrite: false });
-function ghost(root: THREE.Object3D): void {
-  root.traverse((o) => {
-    if (!(o instanceof THREE.Mesh)) return;
-    if (o.material === inkMat) {
-      o.material = ghostInk;
-    } else {
-      const m = o.material as THREE.Material;
-      m.transparent = true;
-      m.opacity = GHOST_OPACITY;
-      m.depthWrite = false;
-    }
-    o.renderOrder = 10; // after the ball and table, so they show through
-  });
-}
-
-function canvasTexture(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  draw(c.getContext('2d')!);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-interface Avatar {
-  root: THREE.Group;
-  body: THREE.Group;
-  armL: THREE.Group;
-  armR: THREE.Group;
-  /** Celebration pose until `until` (world clock, s). */
-  pose: { kind: 'cheer' | 'sad'; until: number } | null;
+/** Table tennis avatar: the shared character plus a paddle. */
+interface PaddleAvatar extends Avatar {
   paddle: THREE.Group;
-  mats: { outfit: THREE.MeshToonMaterial[]; skin: THREE.MeshToonMaterial[]; hair: THREE.MeshToonMaterial };
 }
 
 export class World {
@@ -120,7 +43,9 @@ export class World {
   private histCount = 0;
   /** Online: decaying draw offset for the ball (see nudgeBall). */
   private ballOffset = new THREE.Vector3();
-  private avatars: [Avatar, Avatar];
+  private avatars: [PaddleAvatar, PaddleAvatar];
+  /** 'behind' = over the near player's shoulder; 'side' = broadcast view for two players on one screen. */
+  private view: 'behind' | 'side' = 'behind';
   private camPos = new THREE.Vector3(0, 2.2, HALF_L + 2.6);
   private camLook = new THREE.Vector3(0, TABLE_TOP, -0.5);
   private shakeT = Infinity;
@@ -137,19 +62,7 @@ export class World {
 
   constructor() {
     const s = this.scene;
-    s.background = canvasTexture(4, 256, (ctx) => {
-      const g = ctx.createLinearGradient(0, 0, 0, 256);
-      g.addColorStop(0, C.skyTop);
-      g.addColorStop(1, C.skyBottom);
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, 4, 256);
-    });
-    s.fog = new THREE.Fog(0xc9f0ff, 22, 48);
-
-    s.add(new THREE.HemisphereLight(0xffffff, 0xf6ddb0, 1.6));
-    const sun = new THREE.DirectionalLight(0xfff4c7, 2.2);
-    sun.position.set(3, 8, 5);
-    s.add(sun);
+    skyAndLight(s, 22, 48);
 
     this.buildVenue();
     this.buildTable();
@@ -269,27 +182,15 @@ export class World {
     }
 
     // Palms.
-    const palm = (x: number, z: number, lean: number) => {
-      const g = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 3.4, 8), toon(C.trunk));
-      trunk.position.y = 1.7;
-      g.add(trunk);
-      for (let i = 0; i < 6; i++) {
-        const leaf = outlined(new THREE.SphereGeometry(1, 10, 6), toon(C.palm), 1.06);
-        leaf.scale.set(1.1, 0.12, 0.3);
-        leaf.position.set(Math.cos((i / 6) * Math.PI * 2) * 0.8, 3.35, Math.sin((i / 6) * Math.PI * 2) * 0.8);
-        leaf.rotation.y = -(i / 6) * Math.PI * 2;
-        leaf.rotation.z = -0.35;
-        g.add(leaf);
-      }
-      g.position.set(x, 0, z);
-      g.rotation.z = lean;
+    for (const [x, z, lean] of [
+      [-6.6, -4, 0.08],
+      [6.8, -3, -0.1],
+      [-7.2, 3, 0.05],
+    ] as const) {
+      const g = palm(x, z, lean);
       s.add(g);
       this.palms.push(g);
-    };
-    palm(-6.6, -4, 0.08);
-    palm(6.8, -3, -0.1);
-    palm(-7.2, 3, 0.05);
+    }
   }
 
   private buildTable(): void {
@@ -343,62 +244,14 @@ export class World {
 
   // ───────── Characters (big-head humans, ~2.5 heads tall) ─────────
 
-  private buildAvatar(side: Side): Avatar {
-    const root = new THREE.Group();
-    const body = new THREE.Group();
-    root.add(body);
-    const outfit = toon(side === 0 ? C.p1 : C.p2);
-    const sleeve = toon(side === 0 ? C.p1 : C.p2);
-    const skinA = toon(0xc98b5b);
-    const skinB = toon(0xc98b5b);
-    const hair = toon(0x1e1410);
-
-    const add = (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, k = 1.06) => {
-      const m = outlined(geo, mat, k);
-      m.position.set(x, y, z);
-      parent.add(m);
-      return m;
-    };
-    // Legs + shoes.
-    for (const x of [-0.11, 0.11]) {
-      add(body, new THREE.CapsuleGeometry(0.075, 0.32, 4, 8), toon(C.pants), x, 0.27, 0, 1.1);
-      add(body, new THREE.SphereGeometry(0.11, 12, 8), toon(C.white), x, 0.06, -0.03, 1.1).scale.set(1, 0.6, 1.4);
-    }
-    // Torso with white stripe.
-    add(body, new THREE.CapsuleGeometry(0.22, 0.32, 6, 14), outfit, 0, 0.78, 0, 1.05);
-    const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.225, 0.225, 0.05, 16, 1, true), toon(C.white));
-    stripe.position.y = 0.66;
-    body.add(stripe);
-    // Head (40% of height), ears, hair cap.
-    const headY = 1.36;
-    add(body, new THREE.SphereGeometry(0.34, 22, 16), skinA, 0, headY, 0, 1.04);
-    for (const x of [-0.34, 0.34]) add(body, new THREE.SphereGeometry(0.07, 10, 8), skinB, x, headY, 0, 1.15);
-    const hairCap = outlined(new THREE.SphereGeometry(0.355, 22, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, 1.03);
-    hairCap.position.y = headY + 0.01;
-    hairCap.rotation.x = 0.75; // tipped back so it covers the back of the head (the camera sees the near player from behind)
-    body.add(hairCap);
-    // Left arm.
-    const armL = new THREE.Group();
-    armL.position.set(-0.26, 0.92, 0);
-    add(armL, new THREE.CapsuleGeometry(0.06, 0.26, 4, 8), sleeve, 0, -0.18, 0, 1.15);
-    add(armL, new THREE.SphereGeometry(0.075, 10, 8), skinB, 0, -0.38, 0, 1.15);
-    armL.rotation.z = 0.25;
-    body.add(armL);
-    // Right (paddle) arm.
-    const armR = new THREE.Group();
-    armR.position.set(0.26, 0.92, 0);
-    add(armR, new THREE.CapsuleGeometry(0.06, 0.26, 4, 8), sleeve, 0, -0.18, 0, 1.15);
-    add(armR, new THREE.SphereGeometry(0.075, 10, 8), skinB, 0, -0.38, 0, 1.15);
-    armR.rotation.z = -0.4;
-    body.add(armR);
-
-    root.rotation.y = side === 0 ? 0 : Math.PI;
-    if (side === 0) ghost(root);
-    this.scene.add(root);
-
+  private buildAvatar(side: Side): PaddleAvatar {
+    const a = makeAvatar(side === 0 ? C.p1 : C.p2);
+    a.root.rotation.y = side === 0 ? 0 : Math.PI;
+    if (side === 0) ghost(a.root);
+    this.scene.add(a.root);
     const paddle = this.buildPaddle(side === 0 ? C.p1 : C.p2, side === 0 ? 'circle' : 'diamond');
     this.scene.add(paddle);
-    return { root, body, armL, armR, pose: null, paddle, mats: { outfit: [outfit, sleeve], skin: [skinA, skinB], hair } };
+    return { ...a, paddle };
   }
 
   /** Oversized round face, white rim, wood grip, white ●/◆ marker. Face normal −z in local space. */
@@ -509,12 +362,16 @@ export class World {
   }
 
   setLooks(near: Look, far: Look): void {
-    for (const [side, look] of [[0, near], [1, far]] as const) {
-      const m = this.avatars[side].mats;
-      for (const o of m.outfit) o.color.set(look.outfit);
-      for (const s of m.skin) s.color.set(look.skin);
-      m.hair.color.set(look.hair);
-    }
+    applyLook(this.avatars[0], near);
+    applyLook(this.avatars[1], far);
+  }
+
+  /** Two players on one screen: a side-on camera, and nobody needs to be see-through. */
+  setView(view: 'behind' | 'side'): void {
+    if (view === this.view) return;
+    this.view = view;
+    if (view === 'side') unghost(this.avatars[0].root);
+    else ghost(this.avatars[0].root);
   }
 
   /** Camera shake: amplitude in metres, `hits` decaying jolts (design 7d). */
@@ -582,27 +439,11 @@ export class World {
     const sinceSwing = (game.simTime - p.swingAt) / game.cfg.physics.gameSpeed;
     const swingAnim = sinceSwing >= 0 && sinceSwing < 0.3 ? Math.sin((sinceSwing / 0.3) * Math.PI) : 0;
     // Ready bounce + swing squash.
-    const pose = a.pose && this.clock < a.pose.until ? a.pose.kind : null;
-    if (pose === 'cheer') {
-      // Arms up, hop.
-      a.body.position.y = Math.abs(Math.sin(this.clock * 9)) * 0.16;
-      a.body.rotation.x = 0;
-      a.armL.rotation.z = 2.6;
-      a.armR.rotation.z = -2.6;
-      a.armR.rotation.x = 0;
-    } else if (pose === 'sad') {
-      // Slump forward, arms hang.
-      a.body.position.y = -0.03;
-      a.body.rotation.x = 0.22;
-      a.armL.rotation.z = 0.08;
-      a.armR.rotation.z = -0.08;
-      a.armR.rotation.x = 0;
-    } else {
+    if (!animatePose(a, this.clock)) {
       a.body.position.y = Math.abs(Math.sin(this.clock * 4 + side)) * 0.025;
       a.body.rotation.x = 0;
-      a.armL.rotation.z = 0.25;
-      a.armR.rotation.z = -0.4;
-      a.armR.rotation.x = -swingAnim * 1.2;
+      a.armL.rotation.set(0, 0, 0.25);
+      a.armR.rotation.set(-swingAnim * 1.2, 0, -0.4);
     }
     a.body.scale.set(1 + swingAnim * 0.04, 1 - swingAnim * 0.04, 1);
 
@@ -623,9 +464,15 @@ export class World {
 
   private updateCamera(game: Game, dt: number): void {
     const me = game.players[0];
-    // Behind and above the near player, looking down the table (design 1E key art).
-    _want.set(me.x + 0.75, 2.75, Math.max(me.z, HALF_L + 0.4) + 2.1);
-    _look.set(me.x * 0.3 + 0.15, TABLE_TOP - 0.15, -0.85);
+    if (this.view === 'side') {
+      // Broadcast view from the side of the table: fair to both players.
+      _want.set(-4.4, 2.6, 0);
+      _look.set(0, TABLE_TOP - 0.1, 0);
+    } else {
+      // Behind and above the near player, looking down the table (design 1E key art).
+      _want.set(me.x + 0.75, 2.75, Math.max(me.z, HALF_L + 0.4) + 2.1);
+      _look.set(me.x * 0.3 + 0.15, TABLE_TOP - 0.15, -0.85);
+    }
     const k = 1 - Math.exp(-dt * 4);
     this.camPos.lerp(_want, k);
     this.camLook.lerp(_look, k);
