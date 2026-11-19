@@ -102,7 +102,7 @@ Quaternions on the wire are `[x,y,z,w]`. Ask before adding dependencies beyond: 
 - **Hosting: Render free web service, Virginia (US East)**, defined in `render.yaml` (Blueprint). Render terminates HTTPS and proxies WebSockets.
   Build `npm ci && npm run build`, start `node server/index.ts` (not `npm start`, so SIGTERM reaches the server), health check `/healthz`, `NODE_VERSION=24`, auto-deploy on push to `main`.
   Free-plan behavior: the service sleeps after 15 min with no HTTP requests or WebSocket messages, and the next visit waits ~30–60 s while it wakes. An active match keeps it awake. Upgrading to Starter ($7/mo) removes the sleep.
-- First deploy (you): render.com → New → Blueprint → connect GitHub repo `cknathanlam1/pocket-sports` → apply. The URL is `https://pocket-sports.onrender.com` (or with a suffix if that name is taken).
+- **Live: https://pocket-sports-2nve.onrender.com** (Render Blueprint from GitHub repo `cknathanlam1/pocket-sports`; every push to `main` redeploys).
 - `server/static.ts`: serves `dist/` from memory, brotli/gzip precompressed on first request, ETag/304, immutable cache for hashed `/assets/`, `no-cache` for pages, GET/HEAD only,
   security headers (nosniff, referrer policy, `X-Frame-Options: DENY`, COOP). No CSP yet: fonts come from Google Fonts and jsDelivr. `server/index.ts`: ws `maxPayload` 64 KB, graceful shutdown on SIGTERM (closes sockets with 1012 so clients reconnect).
 - Restarts are survivable: rooms live in memory, so a redeploy or wake-up loses them, but `resume` re-creates the display's room under the same code and token if the code is free, and the phone retries `join` every 3 s (20 tries) after a not-found. Pairing survives a restart without rescanning.
@@ -169,6 +169,6 @@ Desktop testing without a phone: open `/p/CODE` in a mobile-sized tab and dispat
 ## Status / known gaps
 - Mouse swings still work alongside the phone (useful for testing).
 - Testing in the hidden Claude browser pane throttles rAF, and with the 0.1 s frame clamp the game then runs slower than real time. Judge timing feel on a real, visible screen.
-- Not yet deployed (needs the Render Blueprint step above). Not yet verified on a real iPhone/Android, or on cellular. The WebGL fallback screen hasn't been seen in a browser. No TURN server: symmetric NATs fall back to the relay by design.
+- Deployed and smoke-tested (health, headers, compression, pairing, online lobby over P2P). Not yet verified on a real iPhone/Android, or on cellular. The WebGL fallback screen hasn't been seen in a browser. No TURN server: symmetric NATs fall back to the relay by design.
 - Still primitives, not GLTF: characters, venue and props are toon-shaded Three.js primitives (design/SPEC.md has the asset list for real models).
 - The repo lives in OneDrive. Consider excluding `node_modules` from sync.
