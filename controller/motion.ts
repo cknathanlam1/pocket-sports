@@ -219,8 +219,48 @@ export function paddleFace(q: Quat | null, q0: Quat | null): number {
   return -Math.asin(Math.max(-1, Math.min(1, screenUp)));
 }
 
-/** Raw sensor events as recorded (and as the browser delivers them). */
-export type RawEvent = { k: 'o'; t: number; e: V3 } | { k: 'm'; t: number; rr: V3 | null };
+/** Raw sensor events as recorded (and as the browser delivers them). `a` = accelerationIncludingGravity (m/s²). */
+export type RawEvent = { k: 'o'; t: number; e: V3 } | { k: 'm'; t: number; rr: V3 | null; a?: V3 | null };
+
+export interface JumpParams {
+  pushMs2: number;
+  freefallMs2: number;
+  minAirMs: number;
+  pushToAirMs: number;
+  refractoryMs: number;
+}
+
+/**
+ * Jump from the accelerometer (including gravity), whatever way the phone is held: standing still reads
+ * |a| ≈ 9.8; a jump is a takeoff push (|a| well above g) followed by free fall (|a| near 0) while airborne.
+ * A dropped phone has free fall without the push, and an arm swing pushes but never goes weightless, so
+ * neither counts. Returns the take-off time (start of free fall).
+ */
+export class JumpDetector {
+  private readonly p: JumpParams;
+  private lastPush = -Infinity;
+  private airSince: number | null = null;
+  private lastJump = -Infinity;
+
+  constructor(p: JumpParams) {
+    this.p = p;
+  }
+
+  push(t: number, a: V3): number | null {
+    const m = Math.hypot(a[0], a[1], a[2]);
+    if (m >= this.p.pushMs2) this.lastPush = t;
+    if (m > this.p.freefallMs2) {
+      this.airSince = null;
+      return null;
+    }
+    this.airSince ??= t;
+    const air = t - this.airSince;
+    if (air < this.p.minAirMs || t - this.lastJump < this.p.refractoryMs) return null;
+    if (this.airSince - this.lastPush > this.p.pushToAirMs) return null;
+    this.lastJump = t;
+    return this.airSince;
+  }
+}
 
 export class MotionPipeline {
   readonly adapter = new RateAdapter();

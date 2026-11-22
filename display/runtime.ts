@@ -71,6 +71,8 @@ export class Runtime {
   private weakWarned = false;
   /** Tutorial screen listens to swings instead of the game. */
   private swingTap: ((s: Swing) => void) | null = null;
+  /** Showed the "jump to spike" tip this match. */
+  private jumpHinted = false;
   /** The ball already hit the deck this point (one floor sound per point). */
   private floorPlayed = false;
   private prevPhase = '';
@@ -121,6 +123,7 @@ export class Runtime {
     for (const input of [this.mouse, this.host.input] as PaddleInput[]) {
       input.onSwing((s) => this.onSwing(s));
       input.onTap(() => this.onTap(input === this.host.input));
+      input.onJump((t) => this.onJump(t, 0));
     }
     this.host.input.onPause(() => {
       const s = store.get().screen;
@@ -220,22 +223,43 @@ export class Runtime {
     return (this.mouse.face() * 180) / Math.PI;
   }
 
-  private onSwing(s: Swing, side: Side = 0): void {
+  /**
+   * Which side and role a player's phone controls: player 1 = side 0's main player. Player 2 = side 1's
+   * main player (two players facing each other) or side 0's setter (same team); otherwise nothing.
+   */
+  private slot(player: 0 | 1): { side: Side; who: 0 | 1 } | null {
+    if (player === 0) return { side: 0, who: 0 };
+    if (store.get().local2p) return { side: 1, who: 0 };
+    if (store.get().coop) return { side: 0, who: 1 };
+    return null;
+  }
+
+  private onSwing(s: Swing, player: 0 | 1 = 0): void {
     const screen = store.get().screen;
-    if (side === 1 && !store.get().local2p) return;
+    const slot = this.slot(player);
+    if (!slot) return;
     if (screen === 'playing' || screen === 'tutorial') sfx.swing(s.peak);
-    if (this.swingTap && side === 0) return this.swingTap(s);
+    if (this.swingTap && player === 0) return this.swingTap(s);
     if (this.attract || store.get().screen !== 'playing') return;
-    const r = this.game.swing(side, (performance.now() - s.t) / 1000, s);
+    const age = (performance.now() - s.t) / 1000;
+    const r = this.game instanceof VolleyGame ? this.game.swing(slot.side, age, s, slot.who) : this.game.swing(slot.side, age, s);
     this.flushNet();
     if (r.result !== 'none' && r.offsetMs !== undefined)
       store.set({ timing: { key: ++this.key, offsetMs: r.offsetMs, timing: r.timing ?? 'miss', hit: r.result === 'hit' } });
   }
 
+  /** Volleyball: a jump (phone accelerometer or J) lets the next spike be a full-power smash. */
+  private onJump(t: number, player: 0 | 1): void {
+    const slot = this.slot(player);
+    if (!slot || slot.who !== 0 || store.get().screen !== 'playing' || !(this.game instanceof VolleyGame)) return;
+    this.game.jump(slot.side, (performance.now() - t) / 1000);
+  }
+
   /** Space or phone tap: toss in a match. From the phone a tap also drives the menus. */
-  private onTap(fromPhone: boolean, side: Side = 0): void {
+  private onTap(fromPhone: boolean, player: 0 | 1 = 0): void {
     const { screen, settings } = store.get();
-    if (side === 1) {
+    if (player === 1) {
+      // Player 2 serves only when facing player 1 (on the same team, player 1 serves).
       if (screen === 'playing' && store.get().local2p) this.game.toss(1);
       return;
     }
@@ -309,6 +333,7 @@ export class Runtime {
     this.host2 = h;
     h.input.onSwing((s) => this.onSwing(s, 1));
     h.input.onTap(() => this.onTap(true, 1));
+    h.input.onJump((t) => this.onJump(t, 1));
     h.input.onPause(() => {
       if (!store.get().local2p) return;
       const sc = store.get().screen;
@@ -321,7 +346,7 @@ export class Runtime {
       if (prev?.transport === 'none' && st.transport !== 'none') sfx.connect();
       if (prev && prev.transport !== 'none' && st.transport === 'none') sfx.disconnect();
       if (st.transport === 'none') this.sentUi2 = '';
-      if (store.get().local2p && store.get().screen === 'playing' && st.phone !== 'calibrated') this.pause('phone');
+      if ((store.get().local2p || store.get().coop) && store.get().screen === 'playing' && st.phone !== 'calibrated') this.pause('phone');
     });
     return h;
   }
@@ -358,12 +383,18 @@ export class Runtime {
     });
     this.attract = false;
     this.lastPoint = undefined;
-    const local2p = s.players === 2;
+    // Two players: facing each other, or (volleyball) on the same team with player 2 as the setter.
+    const coop = s.players === 2 && s.teamPlay && this.sport === 'volley';
+    const local2p = s.players === 2 && !coop;
     const settings = { ...s, controllers: ['human', local2p ? 'human' : 'cpu'] as const, initialServer: (Math.random() < 0.5 ? 0 : 1) as Side };
-    this.game = this.sport === 'volley' ? new VolleyGame({ ...settings, controllers: [...settings.controllers] }, this.cfg) : new Game({ ...settings, controllers: [...settings.controllers] }, this.cfg);
+    this.game =
+      this.sport === 'volley'
+        ? new VolleyGame({ ...settings, controllers: [...settings.controllers], humanSetter: coop ? [true, false] : undefined }, this.cfg)
+        : new Game({ ...settings, controllers: [...settings.controllers] }, this.cfg);
     this.hudSig = '';
     this.oohDone = false;
-    store.set({ mode: 'match', local2p, opponent: local2p ? P2 : MARLO });
+    this.jumpHinted = false;
+    store.set({ mode: 'match', local2p, coop, cue: null, opponent: local2p ? P2 : MARLO });
     this.world.setView(local2p ? 'side' : 'behind');
     this.world.setPractice(false);
     this.applyLooks();
@@ -412,7 +443,7 @@ export class Runtime {
   /** fromRemote: the opponent resumed. Online, the rally in progress is replayed from the serve on both laptops. */
   resume(fromRemote = false): void {
     if (store.get().screen !== 'paused') return;
-    if (store.get().local2p && !(this.phoneReady && this.phone2Ready) && store.get().pauseReason === 'phone') return;
+    if ((store.get().local2p || store.get().coop) && !(this.phoneReady && this.phone2Ready) && store.get().pauseReason === 'phone') return;
     if (this.isVersus) {
       if (!this.vs?.connected) return; // can't resume without the opponent
       if (!fromRemote) this.vs.send({ k: 'vpz', on: false });
@@ -425,7 +456,7 @@ export class Runtime {
 
   quitToMenu(): void {
     if (this.isVersus) return this.leaveVersusMatch();
-    store.set({ local2p: false, opponent: MARLO });
+    store.set({ local2p: false, coop: false, cue: null, opponent: MARLO });
     this.tt.setView('behind');
     this.volleyWorld?.setView('behind');
     if (this.game.isPractice) this.restoreSport();
@@ -455,8 +486,12 @@ export class Runtime {
     // The near paddle mirrors the phone whenever one is calibrated (even on the menu, as live feedback).
     const q = this.phoneReady ? this.host.input.orientation() : this.attract ? null : this.mouse.orientation();
     if (this.isVersus) this.versusFrame(now, q);
-    const farQ = store.get().local2p ? (this.phone2Ready ? this.host2!.input.orientation() : null) : this.farQ && now - this.farQAt < 500 ? this.farQ : null;
-    if (this.game instanceof VolleyGame) this.vworld.sync(this.game, q, dt, farQ);
+    const q2 = this.phone2Ready ? this.host2!.input.orientation() : null;
+    const farQ = store.get().local2p ? q2 : this.farQ && now - this.farQAt < 500 ? this.farQ : null;
+    if (this.game instanceof VolleyGame) {
+      this.vworld.sync(this.game, q, dt, farQ, store.get().coop ? q2 : null);
+      this.updateCue(this.game);
+    }
     else this.tt.sync(this.game, q, dt, farQ);
     if (!Runtime.OPAQUE.has(screen)) {
       this.renderer.render(this.world.scene, this.world.camera);
@@ -492,6 +527,19 @@ export class Runtime {
     this.renderer.setSize(c.clientWidth, c.clientHeight, false);
   }
 
+  /** Volleyball HUD cue for a human attack: "Jump!" in the run-up, then "Spike!" at the moment to swing. */
+  private updateCue(g: VolleyGame): void {
+    const c = g.contact;
+    let cue: string | null = null;
+    if (store.get().screen === 'playing' && c && !c.done && c.kind === 'attack' && g.isHuman(c.side, c.who)) {
+      const msLeft = ((c.t - g.simTime) / this.cfg.volley.gameSpeed) * 1000;
+      const who = store.get().local2p ? `P${c.side + 1}: ` : '';
+      if (g.jumpRequired() && msLeft > 160 && msLeft < 750 && !g.hasJumped(c.side)) cue = `${who}Jump!${store.get().usingPhone ? '' : ' (J)'}`;
+      else if (msLeft <= 160 && msLeft > -120) cue = `${who}Spike!`;
+    }
+    if (cue !== store.get().cue) store.set({ cue });
+  }
+
   /** "You"/the opponent, or Player 1/Player 2 in local two-player. */
   private sideName(side: Side): string {
     if (store.get().local2p) return side === 0 ? 'Player 1' : 'Player 2';
@@ -504,10 +552,13 @@ export class Runtime {
     if (!h || h.status.transport === 'none') return;
     const screen = store.get().screen;
     const g = this.game;
-    const inMatch = !this.attract && store.get().local2p && (screen === 'playing' || screen === 'paused');
-    const s: UiState = !inMatch ? 'lobby' : screen === 'paused' ? 'paused' : g.phase === 'serve' && g.server === 1 ? 'serve' : g.phase === 'toss' || g.phase === 'rally' ? 'rally' : 'between';
-    const pt: 'won' | 'lost' | undefined = s === 'between' && g.lastPoint?.winner != null ? (g.lastPoint.winner === 1 ? 'won' : 'lost') : undefined;
-    const msg = { k: 'st' as const, s, sc: inMatch ? ([g.score.points[1], g.score.points[0]] as [number, number]) : undefined, pt, nx: g.server === 1, op: 'Player 1' };
+    const { local2p, coop } = store.get();
+    const me: Side = coop ? 0 : 1;
+    const inMatch = !this.attract && (local2p || coop) && (screen === 'playing' || screen === 'paused');
+    const s: UiState = !inMatch ? 'lobby' : screen === 'paused' ? 'paused' : g.phase === 'serve' && g.server === me && !coop ? 'serve' : g.phase === 'toss' || g.phase === 'rally' ? 'rally' : 'between';
+    const pt: 'won' | 'lost' | undefined = s === 'between' && g.lastPoint?.winner != null ? (g.lastPoint.winner === me ? 'won' : 'lost') : undefined;
+    const sc: [number, number] | undefined = inMatch ? [g.score.points[me], g.score.points[other(me)]] : undefined;
+    const msg = { k: 'st' as const, s, sc, pt, nx: g.server === me, op: coop ? this.opName : 'Player 1' };
     const sig = JSON.stringify(msg);
     if (sig === this.sentUi2) return;
     this.sentUi2 = sig;
@@ -623,9 +674,16 @@ export class Runtime {
     st[e.side] = { ...st[e.side], fastest: Math.max(st[e.side].fastest, kmh) };
     store.set({ stats: st });
     // Feedback goes to whoever hit it: you, or player 2 in local two-player. The AI setter's sets get none.
-    const hitter = e.side === 0 ? this.host : store.get().local2p ? this.host2 : null;
-    if (!hitter || e.touch === 'set') return;
-    const tier = e.touch === 'dig' || e.touch === 'tip' ? 'nice' : hitTier(kmh, e.offsetMs);
+    const coopSet = store.get().coop && e.side === 0 && e.who === 1;
+    const hitter = coopSet ? this.host2 : e.side === 0 ? this.host : store.get().local2p ? this.host2 : null;
+    if (!hitter || (e.touch === 'set' && !coopSet)) return;
+    if (e.standing && !this.jumpHinted) {
+      this.jumpHinted = true;
+      store.toast(store.get().usingPhone ? 'Jump as you swing for a full-power spike!' : 'Press J just before you swing to jump and spike', '↑', 'warn');
+    }
+    // Digs and tips are always 'nice'; a standing spike (no jump) can't be a SMASH.
+    const raw = e.touch === 'dig' || e.touch === 'tip' ? 'nice' : hitTier(kmh, e.offsetMs);
+    const tier = e.standing && raw === 'smash' ? 'great' : raw;
     const fx = TIER_FX[tier];
     this.world.spark(b.x, b.y, b.z, tier !== 'nice');
     // Hit-stop freezes our sim; online that would put this laptop behind the other one, so skip it.
@@ -854,6 +912,7 @@ export class Runtime {
     if (!vs) return;
     // Hold a ruling long enough for the opponent's hit to cross the network: RTT plus their phone's delay.
     this.game.netGraceMs = (vs.status.rtt ?? 160) + 150;
+    if (this.game instanceof Game) this.game.netWindowBonusMs = Math.min(this.cfg.net.windowBonusMaxMs, vs.oneWayMs * this.cfg.net.windowBonusScale);
     this.flushNet();
     if (q && now - this.lastPq > 33) {
       this.lastPq = now;

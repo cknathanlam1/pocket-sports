@@ -12,6 +12,7 @@ const FLICK_PX_PER_S = 2500;
 export class MouseInput implements PaddleInput {
   private swings = new Emitter<Swing>();
   private taps = new Emitter<number>();
+  private jumps = new Emitter<number>();
   private samples: Array<{ t: number; x: number; y: number }> = [];
   private nx = 0.5; // normalised mouse position
   private ny = 0.5;
@@ -35,6 +36,7 @@ export class MouseInput implements PaddleInput {
         e.preventDefault();
         this.taps.emit(performance.now());
       }
+      if (k === 'j' && !e.repeat) this.jumps.emit(performance.now());
       this.keys.add(k);
     });
     on('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
@@ -102,6 +104,10 @@ export class MouseInput implements PaddleInput {
 
   onSwing(cb: (s: Swing) => void): () => void {
     return this.swings.on(cb);
+  }
+
+  onJump(cb: (t: number) => void): () => void {
+    return this.jumps.on(cb);
   }
 
   onTap(cb: (t: number) => void): () => void {

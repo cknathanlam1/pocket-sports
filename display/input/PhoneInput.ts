@@ -9,6 +9,7 @@ import { Emitter, type PaddleInput, type Swing } from './PaddleInput.ts';
 export class PhoneInput implements PaddleInput {
   private swings = new Emitter<Swing>();
   private taps = new Emitter<number>();
+  private jumps = new Emitter<number>();
   private pauses = new Emitter<void>();
   private actions = new Emitter<PhoneAction>();
   private q: Quat | null = null;
@@ -58,6 +59,9 @@ export class PhoneInput implements PaddleInput {
       case 'tap':
         this.taps.emit(this.toLocal(m.t));
         break;
+      case 'j':
+        this.jumps.emit(this.toLocal(m.t));
+        break;
       case 's': {
         const sw = { t: this.toLocal(m.t), peak: m.peak, face: m.face, path: m.path, roll: m.roll };
         this.swingHistory.push({ ...sw, arrived: performance.now() });
@@ -88,6 +92,10 @@ export class PhoneInput implements PaddleInput {
 
   onTap(cb: (t: number) => void): () => void {
     return this.taps.on(cb);
+  }
+
+  onJump(cb: (t: number) => void): () => void {
+    return this.jumps.on(cb);
   }
 
   /** Pause button on the phone. */

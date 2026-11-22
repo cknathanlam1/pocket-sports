@@ -19,6 +19,8 @@ export interface MenuSettings {
   bestOf: BestOf;
   /** 1 = you vs the CPU; 2 = two phones on this laptop (local two-player). */
   players: 1 | 2;
+  /** Volleyball with two players: on the same team (player 2 sets) instead of facing each other. */
+  teamPlay: boolean;
 }
 
 export type Sport = 'tt' | 'volley';
@@ -84,8 +86,12 @@ export interface UiState {
   sport: Sport;
   /** Second phone on this laptop (local two-player), once one is set up. */
   phone2: PhoneStatus | null;
-  /** The current match is two players on this laptop (side camera, names P1/P2). */
+  /** The current match is two players on this laptop facing each other (side camera, names P1/P2). */
   local2p: boolean;
+  /** Volleyball, two players on the same team: player 2's phone is the setter. */
+  coop: boolean;
+  /** Big timing cue in the HUD ("Jump!", "Spike!"), or null. */
+  cue: string | null;
   machine: MachineSettings;
   practice: { streak: number; best: number; good: number; total: number; last: { key: number; result: PracticeResult } | null };
   /** volume = effects, music = soundtrack (0–1). */
@@ -123,7 +129,7 @@ export const emptyStats = (): SideStats => ({ longest: 0, fastest: 0, winners: 0
 
 let state: UiState = {
   screen: 'title',
-  settings: load<MenuSettings>(SETTINGS_KEY, { cpuLevel: 'normal', assist: 'normal', bestOf: 3, players: 1 }),
+  settings: load<MenuSettings>(SETTINGS_KEY, { cpuLevel: 'normal', assist: 'normal', bestOf: 3, players: 1, teamPlay: false }),
   look: load<Look>(LOOK_KEY, P1_LOOK),
   hud: null,
   banner: null,
@@ -146,6 +152,8 @@ let state: UiState = {
   sport: load<{ sport: Sport }>(SPORT_KEY, { sport: 'tt' }).sport,
   phone2: null,
   local2p: false,
+  coop: false,
+  cue: null,
   machine: load<MachineSettings>(MACHINE_KEY, { speed: 6, spin: 'none', placement: 'middle', intervalMs: 900 }),
   practice: { streak: 0, best: 0, good: 0, total: 0, last: null },
   audio: load(AUDIO_KEY, { volume: 0.8, muted: false, music: 0.5 }),

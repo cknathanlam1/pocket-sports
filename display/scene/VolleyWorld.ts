@@ -14,6 +14,12 @@ const JUMP_T = 0.7; // s (sim) for the whole jump
 const RING_GEO = new THREE.RingGeometry(0.14, 0.2, 28);
 const SPARK_GEO = [new THREE.CircleGeometry(0.22, 5), new THREE.CircleGeometry(0.38, 5)] as const;
 
+// Kinect-style timing circle: a fixed target ring where the ball will be played, and a ring that shrinks
+// onto it, meeting it exactly at the moment to swing.
+const TARGET_R = 0.55; // m
+const SHRINK_FROM = 3.2; // m: radius when the circle appears
+const CUE_COLORS = { p1: 0x2f6fdb, p2: 0xff8a1f, now: 0xffd23f };
+
 const _want = new THREE.Vector3();
 const _look = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -45,6 +51,8 @@ export class VolleyWorld {
   private sparks: Array<{ mesh: THREE.Mesh; t: number }> = [];
   private squashT = Infinity;
   private ballR: number;
+  private cueTarget: THREE.Mesh;
+  private cueRing: THREE.Mesh;
 
   constructor(ballR: number, halfL: number, halfW: number, netHeight: number, netHalfW: number) {
     this.ballR = ballR;
@@ -78,6 +86,17 @@ export class VolleyWorld {
     this.shadow = new THREE.Mesh(new THREE.CircleGeometry(ballR * BALL_VIS * 1.2, 20), new THREE.MeshBasicMaterial({ color: C.ink, transparent: true, opacity: 0.35, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2;
     s.add(this.shadow);
+
+    const flat = (inner: number, outer: number) => {
+      const m = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 56), new THREE.MeshBasicMaterial({ color: CUE_COLORS.p1, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      m.rotation.x = -Math.PI / 2;
+      m.renderOrder = 5;
+      m.visible = false;
+      s.add(m);
+      return m;
+    };
+    this.cueTarget = flat(TARGET_R - 0.08, TARGET_R);
+    this.cueRing = flat(0.9, 1); // unit ring, scaled to the current radius
   }
 
   // ───────── Venue ─────────
@@ -234,8 +253,11 @@ export class VolleyWorld {
     this.camera.updateProjectionMatrix();
   }
 
-  /** `humanQ`: side 0's hand orientation from the phone; `farQ`: side 1's (local two-player). */
-  sync(game: VolleyGame, humanQ: Quat | null, dt: number, farQ: Quat | null = null): void {
+  /**
+   * `humanQ`: side 0's main player's hand (phone 1). `farQ`: side 1's (two players facing each other).
+   * `mateQ`: side 0's setter (two players on the same team).
+   */
+  sync(game: VolleyGame, humanQ: Quat | null, dt: number, farQ: Quat | null = null, mateQ: Quat | null = null): void {
     this.clock += dt;
     const b = game.ball.p;
     this.ball.position.set(b.x, b.y, b.z);
@@ -244,7 +266,8 @@ export class VolleyWorld {
     this.shadow.position.set(b.x, 0.02, b.z);
     this.shadow.scale.setScalar(1 + h * 0.25);
     (this.shadow.material as THREE.MeshBasicMaterial).opacity = 0.38 / (1 + h * 0.5);
-    for (const sl of this.slots) this.syncAvatar(game, sl, sl.who === 0 ? (sl.side === 0 ? humanQ : farQ) : null);
+    for (const sl of this.slots) this.syncAvatar(game, sl, sl.who === 0 ? (sl.side === 0 ? humanQ : farQ) : sl.side === 0 ? mateQ : null);
+    this.syncCue(game);
     this.updateFx(dt);
     for (let i = 0; i < this.palms.length; i++) this.palms[i]!.rotation.x = Math.sin(this.clock * 0.7 + i) * 0.025;
     const sh = 0.5 + 0.5 * Math.sin(this.clock * 0.9);
@@ -286,6 +309,30 @@ export class VolleyWorld {
         a.armR.quaternion.copy(_q).multiply(REST_R);
       } else a.armR.rotation.set(0, 0, -0.4);
     }
+  }
+
+  /** Timing circle for the next touch a person plays: shrinks onto the target ring at the moment to swing. */
+  private syncCue(game: VolleyGame): void {
+    const c = game.contact;
+    const live = (game.phase === 'toss' || game.phase === 'rally') && c !== null && !c.done && game.isHuman(c.side, c.who);
+    const lead = game.cfg.volley.timingRingSec;
+    const left = live ? (c.t - game.simTime) / game.cfg.volley.gameSpeed : Infinity; // real seconds to contact
+    const show = live && left < lead && left > -0.15;
+    this.cueTarget.visible = this.cueRing.visible = show;
+    if (!show) return;
+    // Player 1 (side 0's main player) is blue; player 2 (far side, or the setter) is orange.
+    const p1 = c.side === 0 && c.who === 0;
+    const now = Math.abs(left) < 0.07;
+    const color = now ? CUE_COLORS.now : p1 ? CUE_COLORS.p1 : CUE_COLORS.p2;
+    const fadeIn = Math.min(1, (lead - left) / 0.2);
+    for (const m of [this.cueTarget, this.cueRing]) {
+      m.position.set(c.p.x, 0.04, c.p.z);
+      const mat = m.material as THREE.MeshBasicMaterial;
+      mat.color.setHex(color);
+      mat.opacity = 0.85 * fadeIn;
+    }
+    const k = Math.max(0, left) / lead;
+    this.cueRing.scale.setScalar(TARGET_R + (SHRINK_FROM - TARGET_R) * k);
   }
 
   /** About to attack or serve: arm drawn back overhead. */

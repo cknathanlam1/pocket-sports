@@ -73,6 +73,10 @@ export class VolleyGame {
   /** Team that touched the ball last, and whether the net stopped it since. */
   private lastTouch: Side | null = null;
   private netBlocked = false;
+  /** Sim time each side's main player last jumped (phone accelerometer or J key). */
+  private jumpAt: [number, number] = [-Infinity, -Infinity];
+  /** Set by the last human attack: it was a standing hit (no jump). */
+  private standing = false;
 
   constructor(settings: GameSettings, cfg: Config) {
     this.cfg = cfg;
@@ -253,13 +257,34 @@ export class VolleyGame {
 
   // ───────────────────────── Human touches ─────────────────────────
 
-  /** A swing from `side`'s main player, `ageReal` seconds ago (input latency, judged at the swing moment). */
-  swing(side: Side, ageReal: number, f: SwingFeatures): SwingResult {
-    if (this.settings.controllers[side] !== 'human') return { result: 'none' };
+  /** Is this player controlled by a person? who 0 = main player, 1 = setter. */
+  isHuman(side: Side, who: 0 | 1): boolean {
+    return who === 0 ? this.settings.controllers[side] === 'human' : !!this.settings.humanSetter?.[side];
+  }
+
+  /** Spikes need a jump (except on Easy assist, where it's automatic). */
+  jumpRequired(): boolean {
+    return this.settings.assist !== 'easy';
+  }
+
+  /** Jumped within the spike window, counting back from now (for the HUD cue). */
+  hasJumped(side: Side): boolean {
+    return ((this.simTime - this.jumpAt[side]) / this.v.gameSpeed) * 1000 <= this.v.jumpLeadMaxMs;
+  }
+
+  /** The main player of `side` jumped `ageReal` seconds ago. */
+  jump(side: Side, ageReal: number): void {
+    if (!this.isHuman(side, 0)) return;
+    this.jumpAt[side] = this.simTime - Math.max(ageReal, 0) * this.v.gameSpeed;
+  }
+
+  /** A swing from `side`'s player `who` (0 = main, 1 = human setter), `ageReal` seconds ago (judged at the swing moment). */
+  swing(side: Side, ageReal: number, f: SwingFeatures, who: 0 | 1 = 0): SwingResult {
+    if (!this.isHuman(side, who)) return { result: 'none' };
     const tSwing = Math.max(this.simTime - Math.max(ageReal, 0) * this.v.gameSpeed, this.ring[0]?.t ?? this.simTime);
     const c = this.contact;
-    const main = this.teams[side][0];
-    const live = (this.phase === 'toss' || this.phase === 'rally') && c !== null && c.side === side && c.who === 0 && !c.done;
+    const main = this.teams[side][who];
+    const live = (this.phase === 'toss' || this.phase === 'rally') && c !== null && c.side === side && c.who === who && !c.done;
     if (!live) {
       main.action = 'spike';
       main.actionAt = tSwing;
@@ -271,14 +296,22 @@ export class VolleyGame {
     const timing = classifyTiming(offsetMs, windowMs, this.cfg);
     if (timing === 'miss') {
       // The touch stays open: a stray early swing shouldn't cost the ball (same as table tennis).
-      main.action = c.kind === 'dig' ? 'dig' : 'spike';
+      main.action = c.kind === 'dig' ? 'dig' : c.kind === 'set' ? 'set' : 'spike';
       main.actionAt = tSwing;
       this.events.push({ type: 'whiff', side, offsetMs, reason: 'timing' });
       return { result: 'miss', offsetMs, timing: 'miss' };
     }
     const at = this.ballAt(tSwing);
-    const touch = c.kind === 'serve' ? this.humanServe(side, f, offsetMs, windowMs, timing, at.ball) : c.kind === 'dig' ? this.humanDig(side, f, timing, at.ball) : this.humanAttack(side, f, offsetMs, windowMs, timing, at.ball);
-    this.strike(side, 0, touch.kind, touch.ball, at.t, offsetMs, timing);
+    this.standing = false;
+    const touch =
+      c.kind === 'serve'
+        ? this.humanServe(side, f, offsetMs, windowMs, timing, at.ball)
+        : c.kind === 'dig'
+          ? this.humanDig(side, f, timing, at.ball)
+          : c.kind === 'set'
+            ? this.humanSet(side, offsetMs, windowMs, timing, at.ball)
+            : this.humanAttack(side, f, offsetMs, windowMs, timing, at.ball, tSwing);
+    this.strike(side, who, touch.kind, touch.ball, at.t, offsetMs, timing);
     const strength = clamp(len(touch.ball.v) / this.v.spikeMax, 0, 1);
     return { result: 'hit', offsetMs, timing, strength };
   }
@@ -321,11 +354,32 @@ export class VolleyGame {
     return { kind: 'dig', ball: this.pass(side, at.p, sloppy ? this.v.passErrorM : 0.25) };
   }
 
-  private humanAttack(side: Side, f: SwingFeatures, offsetMs: number, windowMs: number, timing: TimingClass, at: Ball): { kind: TouchKind; ball: Ball } {
+  /** Human setter (same-team two-player): timing places the set along the net, early = toward your left. */
+  private humanSet(side: Side, offsetMs: number, windowMs: number, timing: TimingClass, at: Ball): { kind: TouchKind; ball: Ball } {
+    const sign = sideSign(side);
+    const offN = clamp(offsetMs / windowMs, -1, 1);
+    const err = timing === 'borderline' ? this.v.passErrorM * 0.7 : 0;
+    const a = this.rng.next() * Math.PI * 2;
+    const x = sign * clamp(this.v.attackLane + offN * 1.2, -this.v.halfW + 0.6, this.v.halfW - 0.6) + Math.cos(a) * err;
+    const to = v3(x, this.v.attackHeight, sign * (this.v.attackGap + Math.abs(Math.sin(a) * err)));
+    return { kind: 'set', ball: { p: { ...at.p }, v: lobTo(at.p, to, this.v.setApex, this.v, this.dt), w: v3() } };
+  }
+
+  /** Did `side` jump in time for a swing at `tSwing`? */
+  private jumped(side: Side, tSwing: number): boolean {
+    const dtMs = ((tSwing - this.jumpAt[side]) / this.v.gameSpeed) * 1000;
+    return dtMs <= this.v.jumpLeadMaxMs && dtMs >= -this.v.jumpLagMaxMs;
+  }
+
+  private humanAttack(side: Side, f: SwingFeatures, offsetMs: number, windowMs: number, timing: TimingClass, at: Ball, tSwing: number): { kind: TouchKind; ball: Ball } {
     const v = this.v;
     // An upward brush is a soft tip into the space behind the block.
     const tip = f.path > 250;
-    const speed = tip ? v.tipSpeed : v.spikeMin + this.power(f) * (v.spikeMax - v.spikeMin);
+    // No jump: a standing hit, with power capped (it can't be a smash).
+    const standing = !tip && this.jumpRequired() && !this.jumped(side, tSwing);
+    this.standing = standing;
+    const power = standing ? Math.min(this.power(f), v.standingSpikePower) : this.power(f);
+    const speed = tip ? v.tipSpeed : v.spikeMin + power * (v.spikeMax - v.spikeMin);
     const target = tip ? this.aim(side, f, offsetMs, windowMs, at.p.x, 2.2, 4.0) : this.aim(side, f, offsetMs, windowMs, at.p.x, v.depthNear, v.depthFar);
     const ball = tip
       ? { p: { ...at.p }, v: lobTo(at.p, { x: target.x, y: v.ballR, z: target.z }, at.p.y + 1.2, v, this.dt), w: v3() }
@@ -367,7 +421,8 @@ export class VolleyGame {
     this.lastTouch = side;
     this.netBlocked = false;
     const speed = len(launched.v);
-    this.events.push({ type: 'hit', side, speed, strength: clamp(speed / 20, 0, 1), serve: kind === 'serve', offsetMs, timing, touch: kind });
+    this.events.push({ type: 'hit', side, speed, strength: clamp(speed / 20, 0, 1), serve: kind === 'serve', offsetMs, timing, touch: kind, who, standing: kind === 'spike' && this.standing });
+    this.standing = false;
 
     this.ball = cloneBall(launched);
     this.ring = this.ring.filter((r) => r.t <= tHit);
@@ -421,8 +476,7 @@ export class VolleyGame {
     const c = this.contact;
     if (!c || c.done || (this.phase !== 'toss' && this.phase !== 'rally')) return;
     if (this.simTime + 1e-9 < c.t) return;
-    const isAi = c.who === 1 || this.settings.controllers[c.side] === 'cpu';
-    if (!isAi) return;
+    if (this.isHuman(c.side, c.who)) return;
     c.done = true;
     const lvl = this.v.cpu[this.settings.cpuLevel];
     const at = this.ball.p;

@@ -123,6 +123,7 @@ Each player uses their own laptop (and optionally their own phone; the mouse wor
 - Pausing (either side, or a phone drop) pauses both; resuming replays the rally from the serve. A dropped opponent pauses the match; when the link returns, the host re-sends `vgo` with the score, so a guest who reloaded rejoins mid-match. Hit-stop is off online (it would stall one laptop's sim).
   The opponent's paddle tilt streams at ~30 Hz (`vpq`). The far player's name/look come from `vhi`. Each player's own assist level applies to their own swings. The host picks best-of and starts and rematches.
 - Tests: `tests/net.test.ts` plays whole matches between two `Game`s over a fake network at 0/40/90 ms one-way (identical results, ball views within 5 cm). It also shows the grace window keeps returns at 300 ms one-way. `tests/rooms.test.ts` covers match rooms.
+- Latency allowance: your timing window grows by the measured one-way delay (`net.windowBonusScale` × RTT/2, capped at `net.windowBonusMaxMs` = 90 ms; `Game.netWindowBonusMs`, set in `versusFrame`), because the opponent's shot reaches you that much late.
 - Known limits: if the host reloads, the match ends (the guest can leave from the pause card). The host decides close calls (tiny cross-browser float drift could disagree on an edge ball). Clients are trusted (fine for friends, not for strangers).
 
 ### Beach volleyball (second sport)
@@ -139,7 +140,13 @@ Pick it on the menu's SPORTS card (`store.sport`, persisted; the menu's backgrou
 - `display/scene/VolleyWorld.ts`: sand, sea, palms, umbrellas, spectators, 16 × 8 m court, net + antennas, four players (dig platform, overhead set, jump-and-swing attacks/serves; the main player's arm mirrors the phone between touches).
   Shared art moved to `display/scene/kit.ts` (palette, toon/outline, ghost/unghost, sky/lights, palm, character, pose animation); `World.ts` uses it too.
 - Sounds: `sfx.volleyHit` (forearm thump, set pats, palm slap by power) and `sfx.sand`. The runtime picks the world from the game type (`this.game instanceof VolleyGame`).
-- Tests: `tests/volley.test.ts` (solver accuracy, 21/15 targets, side-out, full CPU set with dig/set/spike, a scripted human, a mistimed swing).
+- **Kinect-style cues and jumping:** a timing circle (`VolleyWorld.syncCue`) appears under the next ball a person must play, `volley.timingRingSec` ahead, and shrinks onto a fixed target ring exactly at the moment to swing (blue = player 1, orange = player 2, yellow = now).
+  Spikes need a jump: the phone's `JumpDetector` (controller/motion.ts, accelerometer incl. gravity: a takeoff push above `jump.pushMs2`, then ≥ `jump.minAirMs` of free fall; a dropped phone or an arm swing doesn't count) sends `{k:'j', t}`, and J does the same on the keyboard.
+  `VolleyGame.jump(side, age)`; a spike counts as jumping if the take-off was within `volley.jumpLeadMaxMs` before (or `jumpLagMaxMs` after) the swing. Otherwise it's a standing hit capped at `volley.standingSpikePower` (below SMASH; `hit.standing`), and a one-time toast explains it. Easy assist jumps automatically.
+  The HUD cue (`runtime.updateCue`, `store.cue`) says "Jump!" in the run-up (until you've jumped) and "Spike!" at the moment.
+- **Same-team two-player** (Setup → 2 players → Same team, volleyball only, `settings.teamPlay`): player 2's phone is side 0's setter (`humanSetter: [true, false]`, `store.coop`). Their timing places the set along the net (early = toward the left), and borderline timing sprays it.
+  Player 1 digs, serves and spikes. Behind-the-player camera; HUD "P1 + P2". `runtime.slot(player)` maps each phone to { side, who }; `VolleyGame.swing(side, age, f, who)`.
+- Tests: `tests/volley.test.ts` (solver accuracy, 21/15 targets, side-out, full CPU set with dig/set/spike, a scripted human, a mistimed swing); `tests/jump.test.ts` (jump detector, standing vs jumping spikes, Easy auto-jump, human setter, online window bonus).
 
 ### Local two-player (two phones, one laptop)
 Setup → Players: 2. The laptop opens a second pairing room (`PhoneHost('pocket-sports.room2')`, `runtime.host2`) and shows its QR; player 2's phone calibrates on the phone. Start waits for it.

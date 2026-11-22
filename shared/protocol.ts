@@ -15,6 +15,8 @@ export type PhoneMsg =
   /** Swing, stamped at its peak (M3). */
   | { k: 's'; t: number; peak: number; face: number; path: number; roll: number }
   | { k: 'tap'; t: number }
+  /** Jump (take-off), phone clock: needed to spike in volleyball. */
+  | { k: 'j'; t: number }
   /** Calibration pose: paddle orientation = q0⁻¹ · q. */
   | { k: 'cal'; q0: Quat }
   /** Clock sync request (t0 = phone send time). */

@@ -53,7 +53,13 @@ export function watchSensors(cb: (ev: RawEvent) => void): { stop: () => void; fi
   };
   const onMotion = (e: DeviceMotionEvent) => {
     const r = e.rotationRate;
-    cb({ k: 'm', t: e.timeStamp || performance.now(), rr: r && r.alpha !== null ? [r.alpha ?? 0, r.beta ?? 0, r.gamma ?? 0] : null });
+    const g = e.accelerationIncludingGravity;
+    cb({
+      k: 'm',
+      t: e.timeStamp || performance.now(),
+      rr: r && r.alpha !== null ? [r.alpha ?? 0, r.beta ?? 0, r.gamma ?? 0] : null,
+      a: g && g.x !== null ? [g.x ?? 0, g.y ?? 0, g.z ?? 0] : null,
+    });
   };
   window.addEventListener('deviceorientation', onOrient);
   window.addEventListener('devicemotion', onMotion);

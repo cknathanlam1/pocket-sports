@@ -309,3 +309,7 @@ button.sport:hover { transform: translateY(-2px); }
 .p2-card { display: flex; gap: 22px; align-items: center; flex: 1; }
 .p2-card .qr-frame { padding: 10px; }
 .room-inline.small { font-size: 20px; padding: 0 8px; margin-left: 8px; }
+
+/* Volleyball timing cue */
+.cue { position: absolute; left: 50%; top: 300px; transform: translateX(-50%); font: 800 96px var(--font-display); letter-spacing: -0.03em; color: var(--sun-400); -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill; animation: ps-pop 220ms var(--ease-out) both; pointer-events: none; white-space: nowrap; }
+@keyframes ps-pop { from { transform: translateX(-50%) scale(1.4); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }

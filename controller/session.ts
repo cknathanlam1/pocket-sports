@@ -5,7 +5,7 @@ import { PeerLink, type TransportKind } from '../shared/net/PeerLink.ts';
 import { ServerConn } from '../shared/net/ServerConn.ts';
 import type { DisplayMsg, HitTier, MenuMirror, PhoneMsg, Quat, UiState } from '../shared/protocol.ts';
 import { defaultConfig } from '../engine/config.ts';
-import { type DetectedSwing, MotionPipeline, type RawEvent } from './motion.ts';
+import { type DetectedSwing, MotionPipeline, type RawEvent, JumpDetector } from './motion.ts';
 import { Recorder } from './recorder.ts';
 import { type PermissionResult, keepAwake, requestMotion, tryLockPortrait, vibrate, watchSensors } from './sensors.ts';
 
@@ -59,6 +59,7 @@ export class PhoneSession {
   private q: Quat | null = null;
   private q0: Quat | null = null;
   private pipe = new MotionPipeline({ ...defaultConfig.swing });
+  private jumps = new JumpDetector({ ...defaultConfig.jump });
   private recorder = new Recorder();
   private lastSent = 0;
   private flashKey = 0;
@@ -165,6 +166,10 @@ export class PhoneSession {
         this.lastSent = ev.t;
         this.link.send({ k: 'o', t: ev.t, q: this.q, w: Math.round(this.pipe.lastRate) });
       }
+    }
+    if (ev.k === 'm' && ev.a) {
+      const jumpT = this.jumps.push(ev.t, ev.a);
+      if (jumpT !== null) this.link.send({ k: 'j', t: jumpT });
     }
     if (swing) {
       // Swings go on the reliable channel, stamped at the peak in the phone clock.

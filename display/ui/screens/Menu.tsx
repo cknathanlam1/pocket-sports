@@ -152,6 +152,8 @@ type SetupRow = { key: keyof MenuSettings; t: string; d: string; o: Array<[MenuS
 
 const PLAYERS: SetupRow = { key: 'players', t: 'Players', d: 'Play the CPU, or a friend on this laptop with a second phone.', o: [[1, '1 player', 'vs CPU'], [2, '2 players', 'two phones']] };
 
+const TEAM: SetupRow = { key: 'teamPlay', t: 'Two players', d: 'Face each other, or team up against the CPU (player 2 sets, you spike).', o: [[false, 'Versus', 'Face each other'], [true, 'Same team', 'P2 sets for P1']] };
+
 const VOLLEY_LENGTH: SetupRow = { key: 'bestOf', t: 'Match length', d: 'Sets to 21 (win by 2); a deciding set to 15.', o: [[1, '1 set', '~6 min'], [3, 'Best of 3', '~15 min'], [5, 'Best of 5', '~25 min']] };
 
 const SETUP: SetupRow[] = [
@@ -190,7 +192,9 @@ export function Setup({ rt }: { rt: Runtime }) {
   const { settings, phone, phone2, sport } = useUi();
   const two = settings.players === 2;
   const volley = sport === 'volley';
-  const rows = [PLAYERS, ...SETUP.filter((g) => !(two && g.key === 'cpuLevel')).map((g) => (volley && g.key === 'bestOf' ? VOLLEY_LENGTH : g))];
+  // Same team still plays the CPU, so its difficulty row stays.
+  const team = two && volley && settings.teamPlay;
+  const rows = [PLAYERS, ...(two && volley ? [TEAM] : []), ...SETUP.filter((g) => !(two && !team && g.key === 'cpuLevel')).map((g) => (volley && g.key === 'bestOf' ? VOLLEY_LENGTH : g))];
   const p2Ready = phone2?.phone === 'calibrated';
   const summary = two ? `2 players · ${cap(settings.assist)} assist · Best of ${settings.bestOf}` : `${cap(settings.cpuLevel)} CPU · ${cap(settings.assist)} assist · Best of ${settings.bestOf}`;
   return (
@@ -200,7 +204,7 @@ export function Setup({ rt }: { rt: Runtime }) {
         <div className="setup" data-ui>
           <div className="setup-head">
             <div className="h-display">Match setup</div>
-            <div className="setup-vs">{two ? 'Player 1 vs Player 2' : 'You vs CPU'} · {volley ? 'Beach volley' : 'Table tennis'}</div>
+            <div className="setup-vs">{team ? 'Players 1 + 2 vs CPU' : two ? 'Player 1 vs Player 2' : 'You vs CPU'} · {volley ? 'Beach volley' : 'Table tennis'}</div>
           </div>
           {rows.map((g) => (
             <div key={g.key} className="setup-row">

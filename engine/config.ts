@@ -26,6 +26,14 @@ export const defaultConfig = {
     maxSpin: 300, // rad/s
     gameSpeed: 0.85,
   },
+  /** Phone jump detection (accelerometer incl. gravity): a takeoff push, then a moment of free fall. */
+  jump: {
+    pushMs2: 13, // |a| above this = takeoff push (gravity alone is 9.8)
+    freefallMs2: 3.5, // |a| below this = in the air
+    minAirMs: 90, // free fall for at least this long counts as a jump
+    pushToAirMs: 450, // the push must come within this before the free fall
+    refractoryMs: 700,
+  },
   swing: {
     onsetDegPerSec: 300,
     refractoryMs: 250,
@@ -113,6 +121,11 @@ export const defaultConfig = {
     mateSpeed: 6.5,
     pointsToWin: 21,
     decidingSetPoints: 15,
+    // Spikes need a jump (phone accelerometer, or J): the jump must start within this window before the swing.
+    jumpLeadMaxMs: 1000,
+    jumpLagMaxMs: 150, // …or this soon after it (detection can trail the swing)
+    standingSpikePower: 0.2, // a spike without a jump: power capped to this fraction (≈50 km/h, below SMASH)
+    timingRingSec: 1.1, // how long before contact the shrinking timing circle appears
     cpuServeDelayMs: 1400,
     cpu: {
       easy: { digRate: 0.6, attackSpeed: 14, aimErrorM: 1.2, errorRate: 0.14 },
@@ -121,6 +134,10 @@ export const defaultConfig = {
     } satisfies Record<CpuLevel, { digRate: number; attackSpeed: number; aimErrorM: number; errorRate: number }>,
   },
   net: {
+    // Online matches: your timing window grows by the one-way delay × this (capped), because the opponent's
+    // shot reaches your laptop late and you get that much less time to react to it.
+    windowBonusScale: 1,
+    windowBonusMaxMs: 90,
     p2pTimeoutMs: 3000,
     clockSyncIntervalMs: 10_000,
     clockSyncSamples: 10,

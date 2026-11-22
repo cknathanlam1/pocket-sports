@@ -58,6 +58,8 @@ export interface GameSettings {
   /** 'practice': side 1 is a ball machine, no score; returns build a streak. */
   mode?: 'match' | 'practice';
   machine?: MachineSettings;
+  /** Volleyball only: which sides' setters are human (same-team two-player: player 2 sets for side 0). */
+  humanSetter?: [boolean, boolean];
   /**
    * Online match: side 0 is this laptop's player, side 1 is 'remote'. Each laptop judges its own player's
    * hits; the authority (host) alone calls points, waiting `netGraceMs` for a late remote hit first.
@@ -67,7 +69,7 @@ export interface GameSettings {
 
 export type GameEvent =
   /** touch: volleyball only (which kind of contact), for sounds and animation. */
-  | { type: 'hit'; side: Side; speed: number; strength: number; serve: boolean; offsetMs?: number; timing?: TimingClass; touch?: 'serve' | 'dig' | 'set' | 'spike' | 'tip' }
+  | { type: 'hit'; side: Side; speed: number; strength: number; serve: boolean; offsetMs?: number; timing?: TimingClass; touch?: 'serve' | 'dig' | 'set' | 'spike' | 'tip'; who?: 0 | 1; standing?: boolean }
   | { type: 'whiff'; side: Side; offsetMs?: number; reason: 'timing' | 'reach' | 'no-ball' }
   | { type: 'toss'; side: Side }
   | { type: 'bounce'; side: Side; speed: number }
@@ -157,6 +159,8 @@ export class Game {
   private refLog: Array<{ t: number; s: RefereeState }> = [];
   /** Online, host: how long (real ms) to hold a ruling that a remote hit could still overturn. Set from RTT. */
   netGraceMs = 250;
+  /** Online: extra timing window (real ms) for our player, set from the one-way delay to the other laptop. */
+  netWindowBonusMs = 0;
 
   constructor(settings: GameSettings, cfg: Config) {
     this.cfg = cfg;
@@ -520,7 +524,7 @@ export class Game {
       return { result: 'none' };
     }
     const isServe = this.phase === 'toss';
-    const windowMs = this.cfg.assist[this.settings.assist].timingWindowMs;
+    const windowMs = this.cfg.assist[this.settings.assist].timingWindowMs + this.netWindowBonusMs;
     const offsetMs = ((tSwing - c.t) / this.cfg.physics.gameSpeed) * 1000;
     const timing = classifyTiming(offsetMs, windowMs, this.cfg);
     const at = this.ringAt(tSwing);

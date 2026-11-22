@@ -13,6 +13,8 @@ export interface PaddleInput {
   onSwing(cb: (s: Swing) => void): () => void;
   /** Tap = serve toss. `t` in performance.now() ms. */
   onTap(cb: (t: number) => void): () => void;
+  /** Jump (volleyball spikes). `t` in performance.now() ms. */
+  onJump(cb: (t: number) => void): () => void;
   dispose(): void;
 }
 
